@@ -164,12 +164,8 @@
 
   const lang = (document.documentElement.lang || "en").toLowerCase().indexOf("ru") === 0 ? "ru" : "en";
   const T = lang === "ru"
-    ? { book: "Записаться", wa: "или спросите в WhatsApp", close: "Закрыть" }
-    : { book: "Book Now", wa: "or ask on WhatsApp", close: "Close" };
-
-  // Reuse the page's own WhatsApp link so the prefilled message matches the language.
-  const waEl = document.querySelector('a[href^="https://wa.me/"]');
-  const waHref = waEl ? waEl.getAttribute("href") : "https://wa.me/79388883431";
+    ? { book: "Записаться", ask: "или спросите Василия", close: "Закрыть" }
+    : { book: "Book Now", ask: "or ask Vasili", close: "Close" };
 
   let overlay = null;
   let dialog = null;
@@ -192,15 +188,18 @@
         '<p class="tmodal-detail"></p>' +
         '<div class="tmodal-actions">' +
           '<a class="tmodal-book"></a>' +
-          '<a class="tmodal-wa"></a>' +
+          '<button class="tmodal-wa" type="button" data-open-chat></button>' +
         "</div>" +
       "</div>";
     document.body.appendChild(overlay);
     dialog = overlay.querySelector(".tmodal");
 
-    overlay.querySelector(".tmodal-wa").setAttribute("href", waHref);
-    overlay.querySelector(".tmodal-wa").textContent = T.wa;
+    overlay.querySelector(".tmodal-wa").textContent = T.ask;
     overlay.querySelector(".tmodal-book").textContent = T.book;
+
+    // "or ask Vasili": close the modal first; chat.js's delegated
+    // [data-open-chat] listener then opens the chat card.
+    overlay.querySelector(".tmodal-wa").addEventListener("click", close);
 
     // Backdrop click closes (but clicks inside the card don't).
     overlay.addEventListener("click", (e) => {

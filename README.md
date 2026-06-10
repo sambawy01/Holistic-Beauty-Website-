@@ -24,9 +24,11 @@ assets/logo-white.png Brand wordmark (transparent, for dark backgrounds)
 
 ## To-do before launch
 - [x] WhatsApp number connected (+7 938 888 34 31)
-- [ ] Replace placeholder email (`hello@victoriavasilyeva.com`)
+- [x] Replace placeholder email — now `victoria@victoriaholisticbeauty.com`
 - [ ] Confirm the real testimonial text and client name
 - [ ] Confirm "10+ years" experience figure
+
+> Note: WhatsApp is consultation-only (offered via Vasili, the AI assistant); booking goes through `/book`.
 
 ## Prices
 Current prices reflect the June 2026 update (+25%, rounded to nearest hundred).

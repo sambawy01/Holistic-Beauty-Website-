@@ -9,9 +9,10 @@
       : "https://vv-holistic.vercel.app/api/chat";
 
   const RU = document.documentElement.lang === "ru";
-  const WA_URL = RU
-    ? "https://wa.me/79388883431?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5%2C%20%D0%92%D0%B8%D0%BA%D1%82%D0%BE%D1%80%D0%B8%D1%8F!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%B7%D0%B0%D0%BF%D0%B8%D1%81%D0%B0%D1%82%D1%8C%D1%81%D1%8F%20%D0%BD%D0%B0%20%D0%BF%D1%80%D0%BE%D1%86%D0%B5%D0%B4%D1%83%D1%80%D1%83."
-    : "https://wa.me/79388883431?text=Hello%20Victoria%2C%20I%27d%20like%20to%20reserve%20a%20treatment.";
+  const CONTACT_EMAIL = "victoria@victoriaholisticbeauty.com";
+  const BOOK_URL = RU
+    ? "https://vv-holistic.vercel.app/book?lang=ru"
+    : "https://vv-holistic.vercel.app/book";
 
   const T = RU
     ? {
@@ -21,7 +22,9 @@
         placeholder: "Ваш вопрос…",
         send: "Отправить",
         greeting: "Здравствуйте! Я Василий, AI-ассистент Виктории. Спросите меня о процедурах, ценах или уходе за кожей.",
-        fallback: "Я сейчас офлайн — напишите нам в ",
+        fallbackPre: "Я сейчас офлайн — напишите на ",
+        fallbackMid: " или ",
+        fallbackBook: "запишитесь онлайн",
       }
     : {
         open: "Open chat with Vasili — Victoria's AI Assistant",
@@ -30,7 +33,9 @@
         placeholder: "Your question…",
         send: "Send",
         greeting: "Hello! I'm Vasili, Victoria's AI assistant. Ask me anything about our treatments, prices, or skincare.",
-        fallback: "I'm offline right now — message us on ",
+        fallbackPre: "I'm offline right now — email ",
+        fallbackMid: " or ",
+        fallbackBook: "book directly online",
       };
 
   const STORE_KEY = "vv-chat-history";
@@ -115,13 +120,15 @@
     return b;
   };
 
-  // Offline fallback bubble: trusted local string + labeled WhatsApp anchor.
+  // Offline fallback bubble: trusted local strings + labeled email/booking anchors.
   const addFallback = () => {
     const b = el("div", "chat-bubble chat-assistant");
-    b.append(T.fallback);
-    const a = el("a", "chat-link", { href: WA_URL, target: "_blank", rel: "noopener noreferrer" });
-    a.textContent = "WhatsApp";
-    b.append(a, ".");
+    b.append(T.fallbackPre);
+    const mail = el("a", "chat-link", { href: "mailto:" + CONTACT_EMAIL });
+    mail.textContent = CONTACT_EMAIL;
+    const book = el("a", "chat-link", { href: BOOK_URL, target: "_blank", rel: "noopener noreferrer" });
+    book.textContent = T.fallbackBook;
+    b.append(mail, T.fallbackMid, book, ".");
     list.append(b);
     list.scrollTop = list.scrollHeight;
   };
@@ -160,6 +167,15 @@
   launcher.addEventListener("click", () => setOpen(!open));
   closeBtn.addEventListener("click", () => setOpen(false));
   card.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+
+  // Public hook: any [data-open-chat] element opens the chat card.
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest && e.target.closest("[data-open-chat]");
+    if (!t) return;
+    e.preventDefault();
+    setOpen(true);
+    card.scrollIntoView({ block: "nearest" });
+  });
 
   // ---- Send ----
   form.addEventListener("submit", async (e) => {
