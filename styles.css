@@ -296,3 +296,6 @@ h2 {
   .chat-launcher { transition: none !important; }
   .chat-typing span { animation: none !important; opacity: 0.8; }
 }
+
+/* Reserve dual CTAs */
+.reserve-content .cta { margin-left: 8px; margin-right: 8px; }
