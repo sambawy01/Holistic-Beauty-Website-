@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Amber Noir brand theme — Victoria Vasilyeva Holistic Beauty
+ * background #100D0B · text #F2E7D8 · accent #C98E4A
+ * shadcn-style tokens (dark by default) for the booking-calendar components.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-jost);
+  --font-serif: var(--font-playfair);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #100d0b;
+  --foreground: #f2e7d8;
+  --card: #1a1512;
+  --card-foreground: #f2e7d8;
+  --popover: #1a1512;
+  --popover-foreground: #f2e7d8;
+  --primary: #c98e4a;
+  --primary-foreground: #100d0b;
+  --secondary: #261f1a;
+  --secondary-foreground: #f2e7d8;
+  --muted: #261f1a;
+  --muted-foreground: #b3a392;
+  --accent: #c98e4a;
+  --accent-foreground: #100d0b;
+  --destructive: #e5604c;
+  --border: rgba(242, 231, 216, 0.12);
+  --input: rgba(242, 231, 216, 0.16);
+  --ring: #c98e4a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}
