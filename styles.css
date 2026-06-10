@@ -64,6 +64,7 @@ h2 {
 .has-js .nav.visible { opacity: 1; pointer-events: auto; transform: none; }
 .nav-brand { font-family: var(--serif); font-style: italic; font-size: 22px; }
 .nav-links { display: flex; gap: 28px; align-items: center; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; }
+.nav-links a { white-space: nowrap; }
 .nav-links a { opacity: 0.85; transition: opacity 0.3s; }
 .nav-links a:hover { opacity: 1; }
 .nav-cta { border: 1px solid var(--amber); border-radius: 999px; padding: 8px 18px; color: var(--amber-text); }
