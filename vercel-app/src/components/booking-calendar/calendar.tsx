@@ -14,6 +14,8 @@ interface CalendarProps {
   showHeader?: boolean;
   userTimezone: string;
   onTimezoneChange: (timezone: string) => void;
+  /** Explicit duration (minutes) for multi-duration event types */
+  duration?: number;
 }
 
 export const Calendar: React.FC<CalendarProps> = ({
@@ -24,6 +26,7 @@ export const Calendar: React.FC<CalendarProps> = ({
   showHeader,
   userTimezone,
   onTimezoneChange,
+  duration,
 }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -39,7 +42,7 @@ export const Calendar: React.FC<CalendarProps> = ({
 
   // Use custom hook for slots data - only enabled when visible
   const { monthSlots, availableSlots, loading, fetchMonthSlots, fetchSlots } =
-    useCalendarSlots(eventTypeId, hasIntersected);
+    useCalendarSlots(eventTypeId, hasIntersected, duration);
 
   // Auto-select today's date (regardless of availability)
   const autoSelectToday = () => {
@@ -105,12 +108,12 @@ export const Calendar: React.FC<CalendarProps> = ({
   return (
     <div
       ref={calendarRef}
-      className="bg-neutral-900 overflow-hidden rounded-2xl border border-neutral-800 shadow">
+      className="bg-card overflow-hidden rounded-2xl border border-border shadow">
       {/* Optional Header */}
       {showHeader && (
-        <div className="border-b border-neutral-800 p-6 text-center">
-          <h1 className="mb-2 text-2xl font-bold text-neutral-100">{title}</h1>
-          <p className="text-neutral-400">{description}</p>
+        <div className="border-b border-border p-6 text-center">
+          <h1 className="mb-2 text-2xl font-bold text-foreground">{title}</h1>
+          <p className="text-muted-foreground">{description}</p>
         </div>
       )}
 

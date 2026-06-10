@@ -23,16 +23,16 @@ export const CancelConfirmationModal: React.FC<
   return (
     <AlertDialog open={isOpen} onOpenChange={onClose}>
       <AlertDialogContent
-        className="border-neutral-700 bg-neutral-900"
+        className="border-border bg-card"
         aria-describedby="cancel-description"
       >
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-neutral-100">
+          <AlertDialogTitle className="text-foreground">
             Cancel Meeting
           </AlertDialogTitle>
           <AlertDialogDescription
             id="cancel-description"
-            className="text-neutral-400"
+            className="text-muted-foreground"
           >
             Are you sure you want to cancel this meeting? This action cannot be
             undone.

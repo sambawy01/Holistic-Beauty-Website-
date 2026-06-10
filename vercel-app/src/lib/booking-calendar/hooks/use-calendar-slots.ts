@@ -29,7 +29,8 @@ const convertCalcomSlot = (calcomSlot: {
 
 export const useCalendarSlots = (
   eventTypeId: string,
-  enabled: boolean = true
+  enabled: boolean = true,
+  duration?: number // explicit duration for multi-duration event types
 ): UseCalendarSlotsResult => {
   const [monthSlots, setMonthSlots] = useState<MonthSlots>({});
   const [availableSlots, setAvailableSlots] = useState<CalcomSlot[]>([]);
@@ -59,7 +60,7 @@ export const useCalendarSlots = (
         const dateTo = endDate.toISOString().split("T")[0];
 
         const response = await fetch(
-          `/api/booking-calendar/slots?eventTypeId=${eventTypeId}&dateFrom=${dateFrom}&dateTo=${dateTo}`
+          `/api/booking-calendar/slots?eventTypeId=${eventTypeId}&dateFrom=${dateFrom}&dateTo=${dateTo}${duration ? `&duration=${duration}` : ""}`
         );
 
         if (response.ok) {
@@ -79,7 +80,7 @@ export const useCalendarSlots = (
         setMonthSlots({});
       }
     },
-    [eventTypeId, enabled]
+    [eventTypeId, enabled, duration]
   );
 
   // Fetch available slots for selected date
@@ -126,7 +127,7 @@ export const useCalendarSlots = (
         const dateTo = dayAfter.toISOString().split("T")[0];
 
         const response = await fetch(
-          `/api/booking-calendar/slots?eventTypeId=${eventTypeId}&dateFrom=${dateFrom}&dateTo=${dateTo}`
+          `/api/booking-calendar/slots?eventTypeId=${eventTypeId}&dateFrom=${dateFrom}&dateTo=${dateTo}${duration ? `&duration=${duration}` : ""}`
         );
 
         if (response.ok) {
@@ -169,7 +170,7 @@ export const useCalendarSlots = (
         setLoading(false);
       }
     },
-    [eventTypeId, enabled, monthSlots]
+    [eventTypeId, enabled, duration, monthSlots]
   );
 
   return {

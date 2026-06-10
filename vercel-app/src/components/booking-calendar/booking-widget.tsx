@@ -23,6 +23,9 @@ interface BookingWidgetProps {
   title?: string;
   description?: string;
   showHeader?: boolean;
+  /** Event type supports multiple durations — send the explicit duration to Cal.com */
+  multiDuration?: boolean;
+  lang?: 'en' | 'ru';
 }
 
 const BookingWidget: React.FC<BookingWidgetProps> = ({
@@ -31,6 +34,8 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
   title = 'Schedule a Meeting',
   description,
   showHeader = false,
+  multiDuration = false,
+  lang = 'en',
 }) => {
   const [currentStep, setCurrentStep] = useState<BookingStep>('calendar');
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -238,6 +243,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           showHeader={showHeader}
           userTimezone={userTimezone}
           onTimezoneChange={setUserTimezone}
+          duration={multiDuration ? eventLength : undefined}
         />
       )}
 
@@ -247,6 +253,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           eventTypeId={eventTypeId}
           eventLength={eventLength}
           userTimezone={userTimezone}
+          sendLengthInMinutes={multiDuration}
           onSuccess={handleBookingSuccess}
           onBack={handleBackToCalendar}
         />
@@ -261,6 +268,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           showHeader={true}
           userTimezone={userTimezone}
           onTimezoneChange={setUserTimezone}
+          duration={multiDuration ? eventLength : undefined}
         />
       )}
 
@@ -272,24 +280,25 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           onCancel={handleCancel}
           onNewBooking={handleNewBooking}
           isRescheduled={isRescheduled}
+          lang={lang}
         />
       )}
 
       {currentStep === 'cancelled' && (
-        <div className="bg-neutral-900 rounded-2xl border border-neutral-700 shadow-xl">
+        <div className="bg-card rounded-2xl border border-border shadow-xl">
           <div className="p-6 text-center">
             <div className="mb-6 flex justify-center">
-              <div className="rounded-full bg-red-500/10 p-4">
-                <X className="h-12 w-12 text-red-400" />
+              <div className="rounded-full bg-destructive/10 p-4">
+                <X className="h-12 w-12 text-destructive" />
               </div>
             </div>
-            <h2 className="mb-2 text-2xl font-bold text-neutral-100">
+            <h2 className="mb-2 text-2xl font-bold text-foreground">
               Meeting Cancelled
             </h2>
-            <p className="mb-6 text-neutral-400">
+            <p className="mb-6 text-muted-foreground">
               Your meeting has been successfully cancelled.
             </p>
-            <p className="mb-6 text-sm text-neutral-500">
+            <p className="mb-6 text-sm text-muted-foreground">
               Returning to calendar in {cancelCountdown} seconds...
             </p>
             <Button

@@ -24,6 +24,8 @@ interface BookingFormProps {
   eventTypeId: string;
   eventLength: number; // in minutes
   userTimezone: string; // User's selected timezone
+  /** Send the explicit length to Cal.com (multi-duration event types) */
+  sendLengthInMinutes?: boolean;
   onSuccess: (booking: CalcomBookingResponse) => void;
   onBack: () => void;
 }
@@ -33,6 +35,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   eventTypeId,
   eventLength,
   userTimezone,
+  sendLengthInMinutes,
   onSuccess,
   onBack,
 }) => {
@@ -60,6 +63,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         eventTypeId,
         start: selectedSlot,
         end: endTime,
+        ...(sendLengthInMinutes && { lengthInMinutes: eventLength }),
         attendee: {
           name: data.name,
           email: data.email,
@@ -106,7 +110,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   };
 
   return (
-    <div className="bg-neutral-900 overflow-hidden rounded-2xl border border-neutral-800 shadow p-6">
+    <div className="bg-card overflow-hidden rounded-2xl border border-border shadow p-6">
       {/* Meeting Details */}
       <div className="mb-8">
         <MeetingDetails
@@ -130,8 +134,8 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
           {/* Error Display */}
           {form.formState.errors.root && (
-            <Alert className="border-red-500/20 bg-red-500/10">
-              <AlertDescription className="text-red-400">
+            <Alert className="border-destructive/20 bg-destructive/10">
+              <AlertDescription className="text-destructive">
                 {form.formState.errors.root.message}
               </AlertDescription>
             </Alert>
@@ -156,11 +160,11 @@ export const BookingForm: React.FC<BookingFormProps> = ({
           </div>
 
           {/* Privacy Policy Text */}
-          <p className="text-center text-sm text-neutral-400">
+          <p className="text-center text-sm text-muted-foreground">
             By sending, you agree to our{" "}
             <Link
               href="/privacy-policy"
-              className="font-medium text-neutral-200 underline hover:text-blue-400 transition-colors">
+              className="font-medium text-foreground underline hover:text-primary transition-colors">
               Privacy policy
             </Link>{" "}
             and the processing of your data.

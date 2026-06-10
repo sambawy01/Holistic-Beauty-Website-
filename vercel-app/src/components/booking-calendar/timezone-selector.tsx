@@ -48,19 +48,19 @@ export const TimezoneSelector: React.FC<TimezoneSelectorProps> = ({
     <div className="mb-4">
       <Select value={selectedTimezone} onValueChange={onTimezoneChange}>
         <SelectTrigger
-          className="h-8 w-full border-neutral-700 bg-neutral-800/50 text-sm text-neutral-200 hover:border-neutral-600 focus:border-neutral-500"
+          className="h-8 w-full border-border bg-muted/50 text-sm text-foreground hover:border-primary/40 focus:border-primary/50"
           aria-label="Select timezone">
           <SelectValue>
             <div className="flex w-full items-center justify-between gap-1">
-              <span className="text-neutral-400">Timezone: </span>
-              <span className="font-medium text-neutral-300">
+              <span className="text-muted-foreground">Timezone: </span>
+              <span className="font-medium text-foreground/80">
                 {selectedOption?.label || selectedTimezone.replace("_", " ")}
               </span>
             </div>
           </SelectValue>
         </SelectTrigger>
         <SelectContent
-          className="max-h-80 overflow-hidden border-neutral-700 bg-neutral-800"
+          className="max-h-80 overflow-hidden border-border bg-muted"
           position="popper"
           side="bottom"
           align="start"
@@ -75,7 +75,7 @@ export const TimezoneSelector: React.FC<TimezoneSelectorProps> = ({
               <SelectItem
                 key={tz.value}
                 value={tz.value}
-                className="text-neutral-300 focus:bg-neutral-700 focus:text-neutral-100">
+                className="text-foreground/80 focus:bg-secondary focus:text-foreground">
                 {tz.label}
               </SelectItem>
             ))}

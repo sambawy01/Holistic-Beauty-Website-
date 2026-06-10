@@ -2,9 +2,9 @@
 @import "tw-animate-css";
 
 /*
- * Amber Noir brand theme — Victoria Vasilyeva Holistic Beauty
- * background #100D0B · text #F2E7D8 · accent #C98E4A
- * shadcn-style tokens (dark by default) for the booking-calendar components.
+ * Earthy light brand theme — Victoria Vasilyeva Holistic Beauty
+ * background #FAF7F2 · text #3A332C · accent: muted clay/bronze #A9745A
+ * shadcn-style tokens for the booking-calendar components.
  */
 
 @theme inline {
@@ -36,24 +36,24 @@
 
 :root {
   --radius: 0.625rem;
-  --background: #100d0b;
-  --foreground: #f2e7d8;
-  --card: #1a1512;
-  --card-foreground: #f2e7d8;
-  --popover: #1a1512;
-  --popover-foreground: #f2e7d8;
-  --primary: #c98e4a;
-  --primary-foreground: #100d0b;
-  --secondary: #261f1a;
-  --secondary-foreground: #f2e7d8;
-  --muted: #261f1a;
-  --muted-foreground: #b3a392;
-  --accent: #c98e4a;
-  --accent-foreground: #100d0b;
-  --destructive: #e5604c;
-  --border: rgba(242, 231, 216, 0.12);
-  --input: rgba(242, 231, 216, 0.16);
-  --ring: #c98e4a;
+  --background: #faf7f2;
+  --foreground: #3a332c;
+  --card: #fffdf9;
+  --card-foreground: #3a332c;
+  --popover: #fffdf9;
+  --popover-foreground: #3a332c;
+  --primary: #a9745a;
+  --primary-foreground: #fdf9f3;
+  --secondary: #efe8dd;
+  --secondary-foreground: #3a332c;
+  --muted: #f1ece4;
+  --muted-foreground: #847866;
+  --accent: #a9745a;
+  --accent-foreground: #fdf9f3;
+  --destructive: #b5483a;
+  --border: rgba(58, 51, 44, 0.14);
+  --input: rgba(58, 51, 44, 0.18);
+  --ring: #a9745a;
 }
 
 @layer base {

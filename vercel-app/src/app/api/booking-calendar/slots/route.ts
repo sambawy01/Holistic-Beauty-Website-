@@ -5,6 +5,7 @@ export async function GET(request: NextRequest) {
   const eventTypeId = searchParams.get('eventTypeId');
   const dateFrom = searchParams.get('dateFrom');
   const dateTo = searchParams.get('dateTo');
+  const duration = searchParams.get('duration');
 
   if (!eventTypeId || !dateFrom || !dateTo) {
     return NextResponse.json(
@@ -30,6 +31,10 @@ export async function GET(request: NextRequest) {
     apiUrl.searchParams.set('eventTypeId', eventTypeId);
     apiUrl.searchParams.set('start', startTime);
     apiUrl.searchParams.set('end', endTime);
+    // Optional: specific duration for multi-duration event types
+    if (duration && !isNaN(parseInt(duration, 10))) {
+      apiUrl.searchParams.set('duration', duration);
+    }
 
     const response = await fetch(apiUrl.toString(), {
       headers: {

@@ -22,7 +22,7 @@ export const ReferralSection: React.FC<ReferralSectionProps> = ({
 
   return (
     <div className="space-y-4">
-      <Label className="font-medium text-neutral-200 uppercase">
+      <Label className="font-medium text-foreground uppercase">
         How did you find us?
       </Label>
       
@@ -32,8 +32,8 @@ export const ReferralSection: React.FC<ReferralSectionProps> = ({
             key={option.value}
             className={`group relative cursor-pointer rounded-lg border p-4 transition-all duration-200 ${
               selectedReferralSource === option.value
-                ? 'border-blue-500 bg-blue-500/10'
-                : 'border-neutral-600 bg-neutral-800/50 hover:border-neutral-500'
+                ? 'border-primary bg-primary/10'
+                : 'border-border bg-muted/50 hover:border-primary/50'
             }`}
           >
             <input
@@ -47,8 +47,8 @@ export const ReferralSection: React.FC<ReferralSectionProps> = ({
               <span
                 className={`text-sm font-medium ${
                   selectedReferralSource === option.value
-                    ? 'text-blue-400'
-                    : 'text-neutral-300 group-hover:text-neutral-200'
+                    ? 'text-primary'
+                    : 'text-foreground/80 group-hover:text-foreground'
                 }`}
               >
                 {option.label}
@@ -56,7 +56,7 @@ export const ReferralSection: React.FC<ReferralSectionProps> = ({
             </div>
             {selectedReferralSource === option.value && (
               <div className="absolute top-3 right-3">
-                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                <div className="h-2 w-2 rounded-full bg-primary"></div>
               </div>
             )}
           </label>

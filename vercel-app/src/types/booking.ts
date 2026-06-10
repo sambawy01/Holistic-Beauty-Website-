@@ -21,6 +21,8 @@ export interface CalcomBookingRequest {
   eventTypeId: string | number;
   start: string;
   end: string;
+  /** Explicit duration for multi-duration event types */
+  lengthInMinutes?: number;
   attendee: {
     name: string;
     email: string;
@@ -44,6 +46,7 @@ export interface CalcomBookingResponse {
   start: string;
   end: string;
   duration?: number;
+  status?: string; // "pending" when owner confirmation is required
   attendees: Array<{
     email: string;
     name: string;

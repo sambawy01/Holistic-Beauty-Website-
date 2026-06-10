@@ -24,16 +24,16 @@ export const ErrorModal: React.FC<ErrorModalProps> = ({
   return (
     <AlertDialog open={isOpen} onOpenChange={onClose}>
       <AlertDialogContent
-        className="border-neutral-700 bg-neutral-900"
+        className="border-border bg-card"
         aria-describedby="error-description"
       >
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-neutral-100">
+          <AlertDialogTitle className="text-foreground">
             Something went wrong
           </AlertDialogTitle>
           <AlertDialogDescription
             id="error-description"
-            className="text-neutral-400"
+            className="text-muted-foreground"
           >
             {errorMessage}
           </AlertDialogDescription>

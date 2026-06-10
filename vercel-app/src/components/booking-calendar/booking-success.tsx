@@ -20,6 +20,7 @@ interface BookingSuccessProps {
   onCancel: () => void;
   onNewBooking: () => void;
   isRescheduled: boolean;
+  lang?: "en" | "ru";
 }
 
 export const BookingSuccess: React.FC<BookingSuccessProps> = ({
@@ -29,6 +30,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   onCancel,
   onNewBooking,
   isRescheduled,
+  lang = "en",
 }) => {
   // Format the booking details in user's selected timezone
   const formatDateTime = (dateString: string) => {
@@ -111,43 +113,52 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
   const calendarLinks = generateCalendarLinks();
 
   return (
-    <div className="bg-neutral-900 rounded-2xl border border-neutral-700 shadow-xl">
+    <div className="bg-card rounded-2xl border border-border shadow-xl">
       <div className="p-6 text-center">
         {/* Success Icon */}
         <div className="mb-6 flex justify-center">
-          <div className="rounded-full bg-green-500/10 p-4">
-            <CheckCircle className="h-12 w-12 text-green-400" />
+          <div className="rounded-full bg-green-600/10 p-4">
+            <CheckCircle className="h-12 w-12 text-green-700" />
           </div>
         </div>
 
-        {/* Success Message */}
-        <h2 className="mb-2 text-2xl font-bold text-neutral-100">
-          {isRescheduled ? "Meeting rescheduled!" : "Meeting booked!"}
+        {/* Success Message — bookings require Victoria's confirmation, so they
+            start out as pending requests rather than confirmed appointments. */}
+        <h2 className="mb-2 text-2xl font-bold text-foreground">
+          {isRescheduled
+            ? lang === "ru"
+              ? "Запись перенесена"
+              : "Appointment rescheduled"
+            : lang === "ru"
+              ? "Заявка отправлена"
+              : "Request sent"}
         </h2>
-        <p className="mb-8 text-neutral-400">
-          You&apos;ll receive a confirmation email with meeting details shortly.
+        <p className="mb-8 text-muted-foreground">
+          {lang === "ru"
+            ? "Виктория скоро подтвердит вашу запись."
+            : "Victoria will confirm your appointment shortly."}
         </p>
 
         {/* Meeting Details Card */}
-        <div className="mb-8 rounded-xl border border-neutral-600 bg-neutral-800/50 p-6 text-left">
-          <h3 className="mb-4 text-lg font-semibold text-neutral-100">
+        <div className="mb-8 rounded-xl border border-border bg-muted/50 p-6 text-left">
+          <h3 className="mb-4 text-lg font-semibold text-foreground">
             {booking.title || "Meeting Details"}
           </h3>
 
           <div className="space-y-3 text-sm">
             {/* Date & Time */}
             <div className="flex items-center gap-3">
-              <Calendar className="h-4 w-4 text-blue-400" />
+              <Calendar className="h-4 w-4 text-primary" />
               <div className="text-left">
-                <p className="text-neutral-200">{dateStr}</p>
-                <p className="text-neutral-400">{timeStr}</p>
+                <p className="text-foreground">{dateStr}</p>
+                <p className="text-muted-foreground">{timeStr}</p>
               </div>
             </div>
 
             {/* Duration */}
             <div className="flex items-center gap-3">
-              <Clock className="h-4 w-4 text-blue-400" />
-              <p className="text-neutral-200">
+              <Clock className="h-4 w-4 text-primary" />
+              <p className="text-foreground">
                 {booking.duration ||
                   Math.round(
                     (new Date(booking.end).getTime() -
@@ -162,13 +173,13 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
             {attendee && (
               <>
                 <div className="flex items-center gap-3">
-                  <User className="h-4 w-4 text-blue-400" />
-                  <p className="text-neutral-200">{attendee.name}</p>
+                  <User className="h-4 w-4 text-primary" />
+                  <p className="text-foreground">{attendee.name}</p>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <Mail className="h-4 w-4 text-blue-400" />
-                  <p className="text-neutral-200">{attendee.email}</p>
+                  <Mail className="h-4 w-4 text-primary" />
+                  <p className="text-foreground">{attendee.email}</p>
                 </div>
               </>
             )}
@@ -177,7 +188,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
 
         {/* Add to Calendar */}
         <div className="mb-6">
-          <h4 className="mb-3 text-sm font-medium text-neutral-300">
+          <h4 className="mb-3 text-sm font-medium text-foreground/80">
             Add to Calendar
           </h4>
           <div className="flex gap-2">
@@ -185,7 +196,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
               href={calendarLinks.google}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700">
+              className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
               Google
               <ExternalLink className="h-3 w-3" />
             </a>
@@ -194,7 +205,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
               href={calendarLinks.outlook}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-1 rounded-md border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700">
+              className="flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
               Outlook
               <ExternalLink className="h-3 w-3" />
             </a>
@@ -202,7 +213,7 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
             <a
               href={calendarLinks.apple}
               download={`${booking.title || "meeting"}.ics`}
-              className="flex flex-1 items-center justify-center gap-1 rounded-md border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700">
+              className="flex flex-1 items-center justify-center gap-1 rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary">
               Apple
               <ExternalLink className="h-3 w-3" />
             </a>
@@ -216,14 +227,14 @@ export const BookingSuccess: React.FC<BookingSuccessProps> = ({
             <Button
               onClick={onReschedule}
               variant='outline'
-              className="flex flex-1 items-center justify-center gap-2 border-neutral-600">
+              className="flex flex-1 items-center justify-center gap-2 border-border">
               <RotateCcw className="h-4 w-4" />
               Reschedule
             </Button>
             <Button
               onClick={onCancel}
               variant='outline'
-              className="flex flex-1 items-center justify-center gap-2 border-neutral-600">
+              className="flex flex-1 items-center justify-center gap-2 border-border">
               <X className="h-4 w-4" />
               Cancel
             </Button>

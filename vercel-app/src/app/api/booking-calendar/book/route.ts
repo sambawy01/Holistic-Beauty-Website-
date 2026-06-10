@@ -10,6 +10,7 @@ interface BookingRequestV2 {
     language?: string;
   };
   eventTypeId: number;
+  lengthInMinutes?: number;
   metadata?: Record<string, string | number | boolean>;
   guests?: string[];
   bookingFieldsResponses?: Record<string, string | string[]>;
@@ -81,6 +82,11 @@ export async function POST(request: NextRequest) {
         language: "en",
       },
       eventTypeId,
+      // Optional: explicit duration for multi-duration event types
+      ...(bookingData.lengthInMinutes &&
+        !isNaN(parseInt(bookingData.lengthInMinutes)) && {
+          lengthInMinutes: parseInt(bookingData.lengthInMinutes),
+        }),
       // ALL form fields must go in bookingFieldsResponses for v2 API
       bookingFieldsResponses: {
         name: bookingData.attendee.name,

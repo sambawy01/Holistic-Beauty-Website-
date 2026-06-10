@@ -38,28 +38,28 @@ export const RescheduleConfirmationModal: React.FC<
   return (
     <AlertDialog open={isOpen} onOpenChange={onClose}>
       <AlertDialogContent
-        className="border-neutral-700 bg-neutral-900"
+        className="border-border bg-card"
         aria-describedby="reschedule-description"
       >
         <AlertDialogHeader>
-          <AlertDialogTitle className="text-neutral-100">
+          <AlertDialogTitle className="text-foreground">
             Confirm Reschedule
           </AlertDialogTitle>
         </AlertDialogHeader>
 
         <div className="space-y-4 px-6 pb-2">
-          <div id="reschedule-description" className="text-neutral-400">
+          <div id="reschedule-description" className="text-muted-foreground">
             Are you sure you want to reschedule your meeting?
           </div>
 
           {booking && newSlot && (
-            <div className="space-y-2 rounded-lg bg-neutral-800/50 p-4">
+            <div className="space-y-2 rounded-lg bg-muted/50 p-4">
               <div className="flex items-center gap-3">
-                <div className="w-12 rounded bg-red-500/10 px-2 py-1 text-center">
-                  <span className="text-xs font-medium text-red-400">FROM</span>
+                <div className="w-12 rounded bg-destructive/10 px-2 py-1 text-center">
+                  <span className="text-xs font-medium text-destructive">FROM</span>
                 </div>
                 <div className="flex-1 text-sm">
-                  <span className="font-medium text-neutral-200">
+                  <span className="font-medium text-foreground">
                     {new Date(
                       booking.start || booking.startTime || ''
                     ).toLocaleDateString('en-US', {
@@ -69,8 +69,8 @@ export const RescheduleConfirmationModal: React.FC<
                       timeZone: userTimezone,
                     })}
                   </span>
-                  <span className="mx-2 text-neutral-500">•</span>
-                  <span className="text-neutral-400">
+                  <span className="mx-2 text-muted-foreground">•</span>
+                  <span className="text-muted-foreground">
                     {new Date(
                       booking.start || booking.startTime || ''
                     ).toLocaleTimeString('en-US', {
@@ -83,11 +83,11 @@ export const RescheduleConfirmationModal: React.FC<
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="w-12 rounded bg-green-500/10 px-2 py-1 text-center">
-                  <span className="text-xs font-medium text-green-400">TO</span>
+                <div className="w-12 rounded bg-green-600/10 px-2 py-1 text-center">
+                  <span className="text-xs font-medium text-green-700">TO</span>
                 </div>
                 <div className="flex-1 text-sm">
-                  <span className="font-medium text-neutral-200">
+                  <span className="font-medium text-foreground">
                     {new Date(newSlot).toLocaleDateString('en-US', {
                       weekday: 'short',
                       month: 'short',
@@ -95,8 +95,8 @@ export const RescheduleConfirmationModal: React.FC<
                       timeZone: userTimezone,
                     })}
                   </span>
-                  <span className="mx-2 text-neutral-500">•</span>
-                  <span className="text-neutral-400">
+                  <span className="mx-2 text-muted-foreground">•</span>
+                  <span className="text-muted-foreground">
                     {new Date(newSlot).toLocaleTimeString('en-US', {
                       hour: 'numeric',
                       minute: '2-digit',
@@ -108,7 +108,7 @@ export const RescheduleConfirmationModal: React.FC<
             </div>
           )}
 
-          <div className="text-sm text-neutral-400">
+          <div className="text-sm text-muted-foreground">
             Your original meeting time will be replaced and you&apos;ll receive
             a new confirmation email.
           </div>

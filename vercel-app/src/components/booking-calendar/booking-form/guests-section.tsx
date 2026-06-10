@@ -54,7 +54,7 @@ export const GuestsSection: React.FC<GuestsSectionProps> = ({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <Label className="font-medium text-neutral-200">
+        <Label className="font-medium text-foreground">
           Add guests (optional)
         </Label>
         <Button
@@ -62,7 +62,7 @@ export const GuestsSection: React.FC<GuestsSectionProps> = ({
           variant="ghost"
           size="sm"
           onClick={() => setShowGuestInput(!showGuestInput)}
-          className="text-blue-400 hover:text-blue-300 hover:bg-blue-400/10"
+          className="text-primary hover:text-primary hover:bg-primary/10"
         >
           <UserPlus className="h-4 w-4 mr-1" />
           Add guests
@@ -73,15 +73,15 @@ export const GuestsSection: React.FC<GuestsSectionProps> = ({
       {guests.length > 0 && (
         <div className="space-y-2">
           {guests.map((email, index) => (
-            <div key={index} className="border-neutral-600 bg-neutral-800">
+            <div key={index} className="border-border bg-muted">
               <div className="flex items-center justify-between p-3">
-                <span className="text-sm text-neutral-300">{email}</span>
+                <span className="text-sm text-foreground/80">{email}</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={() => removeGuest(email)}
-                  className="text-red-400 hover:text-red-300 hover:bg-red-400/10 h-auto p-1"
+                  className="text-destructive hover:text-destructive/80 hover:bg-destructive/10 h-auto p-1"
                 >
                   Remove
                 </Button>
@@ -118,7 +118,7 @@ export const GuestsSection: React.FC<GuestsSectionProps> = ({
             </Button>
           </div>
           {guestEmailError && (
-            <p className="text-sm text-red-400">{guestEmailError}</p>
+            <p className="text-sm text-destructive">{guestEmailError}</p>
           )}
         </div>
       )}
