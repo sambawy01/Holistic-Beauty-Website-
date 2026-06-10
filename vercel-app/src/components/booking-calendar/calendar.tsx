@@ -86,24 +86,27 @@ export const Calendar: React.FC<CalendarProps> = ({
     fetchMonthSlots,
   ]);
 
-  // Auto-select today's date when month slots are loaded
+  // Auto-select today's date when month slots are loaded; if a date is already
+  // selected (e.g. after a duration/timezone refresh), re-derive its slot list
+  // from the freshly-fetched monthSlots so the panel always shows current data.
   useEffect(() => {
     if (Object.keys(monthSlots).length > 0) {
-      autoSelectToday();
+      if (selectedDate) {
+        fetchSlots(selectedDate);
+      } else {
+        autoSelectToday();
+      }
     }
   }, [monthSlots]);
 
-  // Refresh data when timezone changes
+  // Refresh data when timezone or duration changes
   useEffect(() => {
     if (userTimezone) {
-      // Fetch fresh data for the current month
+      // Fetch fresh data for the current month (this will update monthSlots,
+      // which the effect above will then use to refresh the selected date's slots)
       fetchMonthSlots(currentDate);
-      // If there's a selected date, refetch slots for that date in the new timezone
-      if (selectedDate) {
-        fetchSlots(selectedDate);
-      }
     }
-  }, [userTimezone]);
+  }, [userTimezone, duration]);
 
   return (
     <div
