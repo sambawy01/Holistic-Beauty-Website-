@@ -196,6 +196,11 @@ export default async function BookPage({
           <h1 className="font-serif text-3xl font-medium text-[#3A332C] sm:text-4xl">
             {lang === "ru" ? "Запись на приём" : "Book an Appointment"}
           </h1>
+          <p className="mt-3 text-sm text-[#847866]">
+            {lang === "ru"
+              ? "Обратите внимание: Виктория принимает только женщин."
+              : "Please note: Victoria works with female clients only."}
+          </p>
         </header>
 
         {!calcomConfigured ? (

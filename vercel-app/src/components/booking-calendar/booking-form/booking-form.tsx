@@ -12,11 +12,12 @@ import type {
   CalcomBookingResponse,
 } from "@/types/booking";
 import { calculateEndTime } from "@/lib/booking-calendar/utils/form-utils";
-import { bookingSchema, BookingFormData } from "./schemas";
+import { createBookingSchema, BookingFormData, BookingLang } from "./schemas";
 import { MeetingDetails } from "./meeting-details";
 import { ContactSection } from "./contact-section";
 import { ReferralSection } from "./referral-section";
 import { GuestsSection } from "./guests-section";
+import { PolicyAgreementSection } from "./policy-agreement-section";
 import Link from "next/link";
 
 interface BookingFormProps {
@@ -26,6 +27,7 @@ interface BookingFormProps {
   userTimezone: string; // User's selected timezone
   /** Send the explicit length to Cal.com (multi-duration event types) */
   sendLengthInMinutes?: boolean;
+  lang?: BookingLang;
   onSuccess: (booking: CalcomBookingResponse) => void;
   onBack: () => void;
 }
@@ -36,6 +38,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   eventLength,
   userTimezone,
   sendLengthInMinutes,
+  lang = "en",
   onSuccess,
   onBack,
 }) => {
@@ -43,13 +46,14 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   const [guests, setGuests] = useState<string[]>([]);
 
   const form = useForm<BookingFormData>({
-    resolver: zodResolver(bookingSchema),
+    resolver: zodResolver(createBookingSchema(lang)),
     defaultValues: {
       name: "",
       email: "",
       notes: "",
       guests: [],
       referralSource: undefined,
+      agreedToPolicy: false,
     },
   });
 
@@ -131,6 +135,9 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
           {/* Guests */}
           <GuestsSection guests={guests} onGuestsChange={setGuests} />
+
+          {/* Reservation Policy Agreement */}
+          <PolicyAgreementSection control={form.control} lang={lang} />
 
           {/* Error Display */}
           {form.formState.errors.root && (

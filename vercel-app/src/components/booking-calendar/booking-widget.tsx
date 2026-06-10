@@ -254,6 +254,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           eventLength={eventLength}
           userTimezone={userTimezone}
           sendLengthInMinutes={multiDuration}
+          lang={lang}
           onSuccess={handleBookingSuccess}
           onBack={handleBackToCalendar}
         />

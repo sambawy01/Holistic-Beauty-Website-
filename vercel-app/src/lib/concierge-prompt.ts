@@ -92,7 +92,8 @@ export const BRAND = {
   facts:
     "Victoria Vasilyeva, holistic beauty studio, working in Egypt & Russia, 10+ years of experience, medical-grade techniques combined with mindful restorative care. " +
     "Victoria's credentials: physician by training — Pavlov First Saint Petersburg State Medical University (ПСПбГМУ им. акад. И. П. Павлова): degree in General Medicine / internal medicine physician (терапевт), 2013; surgical residency (ординатура, хирург), 2015; professional retraining in nursing for cosmetology (сестринское дело в косметологии), 2015–2016. " +
-    "She is recognized for serving celebrities and stars from Egypt and the Middle East region (never name specific clients — confidentiality).",
+    "She is recognized for serving celebrities and stars from Egypt and the Middle East region (never name specific clients — confidentiality). " +
+    "Victoria provides services to female clients only — politely inform male inquirers.",
   whatsappNumber: "+7 938 888 34 31",
   whatsappLink: "https://wa.me/79388883431",
 };
@@ -112,7 +113,7 @@ function formatService(s: Service): string {
  * `lang` is the UI language hint; the model must still follow the user's actual language.
  */
 export function buildSystemPrompt(lang: "en" | "ru"): string {
-  return `You are the AI concierge for ${BRAND.name}.
+  return `You are "Vasili", Victoria's AI assistant for ${BRAND.name}. When asked who you are, introduce yourself as Vasili, Victoria's AI assistant.
 
 ABOUT THE STUDIO:
 ${BRAND.facts}

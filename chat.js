@@ -15,21 +15,21 @@
 
   const T = RU
     ? {
-        open: "Открыть чат с бьюти-консьержем",
+        open: "Открыть чат с Василием — AI-ассистентом Виктории",
         close: "Закрыть чат",
-        title: "Бьюти-консьерж",
+        title: "Василий — AI-ассистент Виктории",
         placeholder: "Ваш вопрос…",
         send: "Отправить",
-        greeting: "Здравствуйте! Спросите меня о процедурах, ценах или уходе за кожей.",
+        greeting: "Здравствуйте! Я Василий, AI-ассистент Виктории. Спросите меня о процедурах, ценах или уходе за кожей.",
         fallback: "Я сейчас офлайн — напишите нам в ",
       }
     : {
-        open: "Open Beauty Concierge chat",
+        open: "Open chat with Vasili — Victoria's AI Assistant",
         close: "Close chat",
-        title: "Beauty Concierge",
+        title: "Vasili — Victoria's AI Assistant",
         placeholder: "Your question…",
         send: "Send",
-        greeting: "Hello! Ask me anything about our treatments, prices, or skincare.",
+        greeting: "Hello! I'm Vasili, Victoria's AI assistant. Ask me anything about our treatments, prices, or skincare.",
         fallback: "I'm offline right now — message us on ",
       };
 
