@@ -91,7 +91,7 @@ h2 {
 }
 .hero-content { position: relative; z-index: 2; text-align: center; padding: 0 20px; }
 .hero-name { line-height: 1.05; }
-.hero-logo { width: min(540px, 80vw); margin: 0 auto; filter: drop-shadow(0 2px 24px rgba(11,9,8,0.55)); }
+.hero-logo { width: min(540px, 80vw); height: auto; margin: 0 auto; filter: drop-shadow(0 2px 24px rgba(11,9,8,0.55)); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .nav-logo { height: 30px; width: auto; display: block; }
 .hero-sub { margin-top: 18px; font-size: 12px; letter-spacing: 0.5em; text-indent: 0.5em; color: var(--amber-text); }
