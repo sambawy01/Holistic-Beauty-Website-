@@ -301,22 +301,81 @@ button.cta { background: none; font-family: inherit; line-height: inherit; curso
   html { scroll-behavior: auto; }
 }
 
-/* ===== Concierge chat ===== */
+/* ===== Concierge chat =====
+   Vasili floats above everything (nav z-50, tmodal scrim z-70) on every page. */
 .chat-launcher {
-  position: fixed; right: 24px; bottom: 24px; z-index: 60;
-  width: 56px; height: 56px; border-radius: 50%;
-  border: none; background: var(--clay-deep); cursor: pointer;
+  position: fixed; right: 24px; bottom: 24px; z-index: 80;
+  width: 64px; height: 64px; border-radius: 50%;
+  border: none; cursor: pointer;
+  background: radial-gradient(125% 125% at 30% 22%, var(--clay) 0%, var(--clay-deep) 58%, #6F4029 100%);
   display: grid; place-items: center;
-  box-shadow: 0 6px 24px rgba(58, 51, 44, 0.3);
-  opacity: 0; pointer-events: none; transform: translateY(12px);
-  transition: opacity 0.5s var(--ease), transform 0.5s var(--ease), background-color 0.3s;
+  box-shadow: 0 10px 30px rgba(58, 51, 44, 0.35), inset 0 1px 0 rgba(255, 253, 249, 0.28);
+  transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
-.chat-launcher svg { stroke: var(--bg); } /* overrides the inline stroke attribute */
-.chat-launcher.visible { opacity: 1; pointer-events: auto; transform: none; }
-.chat-launcher:hover { background: #6F4029; }
+.chat-launcher:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(58, 51, 44, 0.4), inset 0 1px 0 rgba(255, 253, 249, 0.28);
+}
+.chat-launcher:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 3px; }
+.chat-launcher svg { display: block; }
+
+/* Breathing pulse ring — draws the eye until the chat is opened once */
+.chat-launcher::before {
+  content: ""; position: absolute; inset: -2px; border-radius: 50%;
+  border: 2px solid var(--clay); pointer-events: none;
+  animation: chat-pulse 3.2s var(--ease) infinite;
+}
+@keyframes chat-pulse {
+  0% { transform: scale(1); opacity: 0.65; }
+  70%, 100% { transform: scale(1.42); opacity: 0; }
+}
+.chat-launcher.calm::before { animation: none; opacity: 0; }
+
+/* Intro teaser — "Meet Vasili" card above the launcher */
+.chat-teaser {
+  position: fixed; right: 24px; bottom: 102px; z-index: 80;
+  width: min(300px, calc(100vw - 32px));
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 40px rgba(58, 51, 44, 0.2);
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.45s var(--ease), transform 0.45s var(--ease);
+}
+.chat-teaser.show { opacity: 1; transform: none; }
+.chat-teaser[hidden] { display: none; }
+.chat-teaser::after { /* notch pointing to the launcher */
+  content: ""; position: absolute; right: 24px; bottom: -7px;
+  width: 12px; height: 12px; background: var(--card);
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.chat-teaser-body {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  padding: 14px 38px 14px 18px; border-radius: 14px;
+  color: inherit;
+}
+.chat-teaser-body:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 2px; }
+.chat-teaser-name {
+  display: block; font-family: var(--serif); font-weight: 600;
+  font-size: 19px; line-height: 1.25; color: var(--clay-deep);
+  margin-bottom: 4px;
+}
+.chat-teaser-line {
+  display: block; font-family: var(--sans); font-weight: 400;
+  font-size: 13px; line-height: 1.5; color: var(--ink-soft);
+}
+.chat-teaser-close {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; cursor: pointer; padding: 6px;
+  color: var(--ink-soft); display: grid; place-items: center;
+  border-radius: 6px; transition: color 0.3s;
+}
+.chat-teaser-close:hover { color: var(--ink); }
+.chat-teaser-close:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 1px; }
 
 .chat-card {
-  position: fixed; right: 24px; bottom: 92px; z-index: 60;
+  position: fixed; right: 24px; bottom: 102px; z-index: 80;
   width: 360px; max-width: calc(100vw - 32px); max-height: 60vh;
   display: flex; flex-direction: column;
   background: var(--card); color: var(--ink);
@@ -393,11 +452,14 @@ button.cta { background: none; font-family: inherit; line-height: inherit; curso
 
 @media (max-width: 480px) {
   .chat-launcher { right: 16px; bottom: 16px; }
-  .chat-card { right: 16px; left: 16px; width: auto; bottom: 84px; }
+  .chat-teaser { right: 16px; bottom: 92px; width: min(300px, calc(100vw - 32px)); }
+  .chat-card { right: 16px; left: 16px; width: auto; bottom: 92px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-card { animation: none !important; }
   .chat-launcher { transition: none !important; }
+  .chat-launcher::before { animation: none !important; opacity: 0; }
+  .chat-teaser { transition: none !important; transform: none; }
   .chat-typing span { animation: none !important; opacity: 0.8; }
 }
 

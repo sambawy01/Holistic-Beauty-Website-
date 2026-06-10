@@ -22,6 +22,9 @@
         placeholder: "Ваш вопрос…",
         send: "Отправить",
         greeting: "Здравствуйте! Я Василий, AI-ассистент Виктории. Спросите меня о процедурах, ценах или уходе за кожей.",
+        teaserName: "Знакомьтесь: Василий",
+        teaserLine: "AI-ассистент Виктории — спросите о процедурах, ценах и уходе",
+        teaserDismiss: "Скрыть подсказку",
         fallbackPre: "Я сейчас офлайн — напишите на ",
         fallbackMid: " или ",
         fallbackBook: "запишитесь онлайн",
@@ -33,6 +36,9 @@
         placeholder: "Your question…",
         send: "Send",
         greeting: "Hello! I'm Vasili, Victoria's AI assistant. Ask me anything about our treatments, prices, or skincare.",
+        teaserName: "Meet Vasili",
+        teaserLine: "Victoria's AI assistant — ask about treatments, prices & skincare",
+        teaserDismiss: "Dismiss",
         fallbackPre: "I'm offline right now — email ",
         fallbackMid: " or ",
         fallbackBook: "book directly online",
@@ -61,9 +67,14 @@
     return n;
   };
 
+  // Launcher: serif-italic "V" monogram with a clay-pale sparkle — Vasili's mark.
   const launcher = el("button", "chat-launcher", { type: "button", "aria-label": T.open, "aria-expanded": "false" });
   launcher.innerHTML =
-    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#191411" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.38-4.1-1.05L3 20l1.05-5.4A8.5 8.5 0 1 1 21 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/></svg>';
+    '<svg viewBox="0 0 64 64" width="38" height="38" aria-hidden="true" focusable="false">' +
+      '<text x="29" y="48" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="46" fill="#FFFDF9">V</text>' +
+      '<path d="M47 7.5c1.05 4.15 2.85 5.95 7 7-4.15 1.05-5.95 2.85-7 7-1.05-4.15-2.85-5.95-7-7 4.15-1.05 5.95-2.85 7-7z" fill="#E9CDAF"/>' +
+      '<circle cx="40.5" cy="20" r="1.4" fill="#E9CDAF" opacity="0.85"/>' +
+    '</svg>';
 
   const card = el("section", "chat-card", { role: "dialog", "aria-label": T.title, hidden: "" });
 
@@ -85,18 +96,50 @@
   form.append(input, sendBtn);
 
   card.append(header, list, form);
-  document.body.append(launcher, card);
 
-  // ---- Launcher visibility: appears after the hero scrolls out (same pattern as the nav) ----
-  const hero = document.getElementById("hero");
-  if (hero) {
-    new IntersectionObserver(
-      ([e]) => launcher.classList.toggle("visible", !e.isIntersecting),
-      { threshold: 0.08 }
-    ).observe(hero);
+  // ---- Intro teaser: a one-time invitation so visitors know who Vasili is ----
+  const INTRO_KEY = "vv-vasili-intro-seen";
+  const introSeen = () => {
+    try { return localStorage.getItem(INTRO_KEY) === "1"; }
+    catch { return true; } // storage unavailable — stay quiet rather than nag on every load
+  };
+  const markIntroSeen = () => {
+    try { localStorage.setItem(INTRO_KEY, "1"); } catch { /* ignore */ }
+  };
+
+  const teaser = el("aside", "chat-teaser", { hidden: "" });
+  const teaserBody = el("button", "chat-teaser-body", { type: "button", "aria-label": T.open });
+  const teaserName = el("strong", "chat-teaser-name");
+  teaserName.textContent = T.teaserName;
+  const teaserLine = el("span", "chat-teaser-line");
+  teaserLine.textContent = T.teaserLine;
+  teaserBody.append(teaserName, teaserLine);
+  const teaserClose = el("button", "chat-teaser-close", { type: "button", "aria-label": T.teaserDismiss });
+  teaserClose.innerHTML =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  teaser.append(teaserBody, teaserClose);
+
+  document.body.append(launcher, teaser, card);
+
+  const hideTeaser = () => {
+    if (teaser.hidden) return;
+    teaser.classList.remove("show");
+    teaser.hidden = true;
+    markIntroSeen();
+  };
+
+  const REDUCED = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!introSeen()) {
+    setTimeout(() => {
+      if (open) return; // chat already opened — no need to introduce
+      teaser.hidden = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => teaser.classList.add("show")));
+    }, REDUCED ? 0 : 1500);
   } else {
-    launcher.classList.add("visible");
+    launcher.classList.add("calm"); // returning visitor — no pulse ring
   }
+
+  teaserClose.addEventListener("click", hideTeaser);
 
   // ---- Safe rendering: text nodes only, URLs linkified into real anchors ----
   const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
@@ -152,6 +195,9 @@
     card.hidden = !v;
     launcher.setAttribute("aria-expanded", String(v));
     if (v) {
+      hideTeaser();
+      markIntroSeen();
+      launcher.classList.add("calm"); // pulse ring retires after the first open
       if (!greeted) {
         greeted = true;
         if (history.length) history.forEach((m) => addBubble(m.role, m.content));
@@ -165,6 +211,7 @@
   };
 
   launcher.addEventListener("click", () => setOpen(!open));
+  teaserBody.addEventListener("click", () => setOpen(true));
   closeBtn.addEventListener("click", () => setOpen(false));
   card.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
 
