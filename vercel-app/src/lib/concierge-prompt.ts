@@ -90,7 +90,9 @@ export const SERVICES: Service[] = [
 export const BRAND = {
   name: "Victoria Vasilyeva Holistic Beauty",
   facts:
-    "Victoria Vasilyeva, holistic beauty studio, working in Egypt & Russia, 10+ years of experience, medical-grade techniques combined with mindful restorative care.",
+    "Victoria Vasilyeva, holistic beauty studio, working in Egypt & Russia, 10+ years of experience, medical-grade techniques combined with mindful restorative care. " +
+    "Victoria's credentials: physician by training — Pavlov First Saint Petersburg State Medical University (ПСПбГМУ им. акад. И. П. Павлова): degree in General Medicine / internal medicine physician (терапевт), 2013; surgical residency (ординатура, хирург), 2015; professional retraining in nursing for cosmetology (сестринское дело в косметологии), 2015–2016. " +
+    "She is recognized for serving celebrities and stars from Egypt and the Middle East region (never name specific clients — confidentiality).",
   whatsappNumber: "+7 938 888 34 31",
   whatsappLink: "https://wa.me/79388883431",
 };
