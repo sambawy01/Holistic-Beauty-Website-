@@ -11,13 +11,30 @@ import { Label } from '@/components/ui/label';
 
 interface ContactSectionProps<T extends FieldValues> {
   control: Control<T>;
+  lang?: "en" | "ru";
 }
 
-export const ContactSection = <T extends FieldValues>({ control }: ContactSectionProps<T>) => {
+const CONTACT_STRINGS = {
+  en: {
+    label: "Contact Information",
+    name: "Full name",
+    email: "Email",
+    notes: "Anything Victoria should know before your session? (optional)",
+  },
+  ru: {
+    label: "Контактные данные",
+    name: "Имя и фамилия",
+    email: "Эл. почта",
+    notes: "Что Виктории стоит знать перед сеансом? (необязательно)",
+  },
+} as const;
+
+export const ContactSection = <T extends FieldValues>({ control, lang = "en" }: ContactSectionProps<T>) => {
+  const t = CONTACT_STRINGS[lang];
   return (
     <div className="space-y-4">
       <Label className="font-medium text-foreground uppercase">
-        Contact Information
+        {t.label}
       </Label>
       
       <div className="flex flex-col gap-4 sm:flex-row">
@@ -30,7 +47,7 @@ export const ContactSection = <T extends FieldValues>({ control }: ContactSectio
               <FormControl>
                 <Input
                   type="text"
-                  placeholder="Full name"
+                  placeholder={t.name}
                   {...field}
                   className="h-12 bg-muted text-foreground border-border focus-visible:border-primary focus-visible:ring-primary/50"
                 />
@@ -49,7 +66,7 @@ export const ContactSection = <T extends FieldValues>({ control }: ContactSectio
               <FormControl>
                 <Input
                   type="email"
-                  placeholder="Business email"
+                  placeholder={t.email}
                   {...field}
                   className="h-12 bg-muted text-foreground border-border focus-visible:border-primary focus-visible:ring-primary/50"
                 />
@@ -68,7 +85,7 @@ export const ContactSection = <T extends FieldValues>({ control }: ContactSectio
           <FormItem>
             <FormControl>
               <Textarea
-                placeholder="A few details about your project will help me prepare better for our call"
+                placeholder={t.notes}
                 {...field}
                 rows={5}
                 className="h-36 resize-none bg-muted text-foreground border-border focus-visible:border-primary focus-visible:ring-primary/50"

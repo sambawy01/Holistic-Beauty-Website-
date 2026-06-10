@@ -128,7 +128,7 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       <Form {...form}>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
           {/* Contact Information */}
-          <ContactSection control={form.control} />
+          <ContactSection control={form.control} lang={lang} />
 
           {/* Referral Source */}
           <ReferralSection watch={form.watch} setValue={form.setValue} />
