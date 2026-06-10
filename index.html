@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Victoria Vasilyeva — Holistic Beauty | El Gouna, Egypt</title>
+  <meta name="description" content="Holistic beauty treatments in El Gouna, Egypt. Facial massage, HydroFacial, microneedling, peels and medical body massage by Victoria Vasilyeva." />
+  <meta property="og:title" content="Victoria Vasilyeva — Holistic Beauty" />
+  <meta property="og:description" content="Holistic facial & body treatments in El Gouna, Egypt." />
+  <meta property="og:type" content="website" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background-color: #0a0a0a;
+    }
+
+    /* ---------- Liquid glass ---------- */
+    .liquid-glass {
+      background: rgba(255, 255, 255, 0.01);
+      background-blend-mode: luminosity;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    .liquid-glass::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      padding: 1.4px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.15) 20%, rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.15) 80%, rgba(255,255,255,0.45) 100%);
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events: none;
+    }
+
+    /* ---------- Marquees ---------- */
+    @keyframes marquee-left { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @keyframes marquee-right { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+    .animate-marquee-left { animation: marquee-left 22s linear infinite; }
+    .animate-marquee-right { animation: marquee-right 26s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .animate-marquee-left, .animate-marquee-right, .glow { animation: none !important; }
+    }
+
+    /* ---------- Noise overlay ---------- */
+    .noise-overlay { position: relative; }
+    .noise-overlay::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.55;
+      mix-blend-mode: soft-light;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      background-size: 240px 240px;
+    }
+
+    /* ---------- Ambient bronze glow (replaces background videos) ---------- */
+    .glow-card { position: relative; overflow: hidden; background: #000; }
+    .glow {
+      position: absolute;
+      width: 70%;
+      aspect-ratio: 1;
+      border-radius: 9999px;
+      filter: blur(70px);
+      opacity: 0.5;
+      animation: drift 14s ease-in-out infinite alternate;
+    }
+    .glow.bronze { background: radial-gradient(circle, #8a5a3b 0%, transparent 70%); top: -15%; right: -15%; }
+    .glow.rose   { background: radial-gradient(circle, #7d4f43 0%, transparent 70%); bottom: -20%; left: -15%; animation-delay: -7s; }
+    .glow.cream  { background: radial-gradient(circle, #b9a386 0%, transparent 70%); top: 30%; left: 25%; opacity: 0.25; animation-delay: -3s; }
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(6%, 8%) scale(1.15); }
+    }
+
+    .marquee-mask {
+      -webkit-mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+      mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+    }
+
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.7);
+    }
+
+    .price-row { border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .price-row:last-child { border-bottom: none; }
+  </style>
+</head>
+
+<body class="min-h-screen bg-[#0a0a0a] text-white">
+
+  <section class="flex min-h-screen flex-col px-4 py-6 sm:px-6 sm:py-8 md:px-10 md:py-10 lg:px-14">
+
+    <!-- ================= Header ================= -->
+    <header class="mb-6 flex flex-col gap-6 sm:mb-8 md:flex-row md:items-end md:justify-between md:gap-8">
+      <div class="max-w-3xl">
+        <img src="assets/logo-white.png" alt="Victoria Vasilyeva — Holistic Beauty"
+             class="w-64 sm:w-72 md:w-80 lg:w-[360px]" />
+        <p class="mt-4 max-w-3xl text-sm leading-[1.6] text-white/60 md:text-[15px]">
+          Holistic facial and body treatments in El Gouna, Egypt. Combining medical-grade
+          techniques with mindful, restorative care — so your skin doesn't just look
+          renewed, it feels it.
+        </p>
+      </div>
+
+      <a href="https://wa.me/200000000000"
+         class="liquid-glass flex-none self-start rounded-full px-5 py-2.5 text-sm whitespace-nowrap transition-opacity hover:opacity-80 sm:px-6 sm:py-3">
+        Book Your Treatment
+      </a>
+    </header>
+
+    <!-- ================= Bento grid ================= -->
+    <div class="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 md:gap-5 lg:grid-cols-3">
+
+      <!-- ---- Column 1: Services & Prices ---- -->
+      <div class="glow-card flex flex-col rounded-2xl p-5 md:p-6">
+        <div class="glow bronze"></div>
+        <div class="glow rose"></div>
+
+        <div class="relative z-10 mb-5 flex items-center justify-center gap-2">
+          <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+          <span class="section-label">Services &amp; Prices</span>
+          <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+        </div>
+
+        <div class="relative z-10 flex flex-1 flex-col justify-between text-[13.5px]">
+          <div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Facial Massage <span class="text-white/45">· Plastic / Myofascial / Buccal</span></span>
+              <span class="flex-none text-right text-white/70">£1,900 <span class="text-white/40">60m</span> · £2,800 <span class="text-white/40">90m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Medical Body Massage</span>
+              <span class="flex-none text-right text-white/70">£2,100 <span class="text-white/40">40m</span> · £2,800 <span class="text-white/40">60m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Microcurrent / RF Therapy</span>
+              <span class="flex-none text-right text-white/70">£900 <span class="text-white/40">20m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">HydroFacial + Ultrasonic Cleaning <span class="text-white/45">· Onmacabim</span></span>
+              <span class="flex-none text-right text-white/70">£3,100 <span class="text-white/40">60–90m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Clear Skin with HOLY LAND <span class="text-white/45">· Fruit Peel &amp; Hydro Mask</span></span>
+              <span class="flex-none text-right text-white/70">£1,500</span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Non-Invasive Carboxytherapy</span>
+              <span class="flex-none text-right text-white/70">£1,100 <span class="text-white/40">30m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Mandelic Onmacabim Peel <span class="text-white/45">· All-Season Lifting</span></span>
+              <span class="flex-none text-right text-white/70">£1,400 <span class="text-white/40">20m</span></span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2.5">
+              <span class="text-white/90">Alginate Mask</span>
+              <span class="flex-none text-right text-white/70">£900</span>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <p class="section-label mb-1.5 !text-[10px]">Derma Pen · Microneedling</p>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2">
+              <span class="text-white/90">Full Face + Neck + Décolletage</span>
+              <span class="flex-none text-white/70">£3,800</span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2">
+              <span class="text-white/90">Full Face + Neck</span>
+              <span class="flex-none text-white/70">£2,800</span>
+            </div>
+            <div class="price-row flex items-baseline justify-between gap-3 py-2">
+              <span class="text-white/90">Single Area</span>
+              <span class="flex-none text-white/70">£2,100</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---- Column 2 ---- -->
+      <div class="grid gap-4 md:gap-5" style="grid-template-rows: auto 1fr;">
+
+        <!-- Client Voice -->
+        <div class="noise-overlay overflow-hidden rounded-2xl bg-[#4a3a31] p-5 md:p-6">
+          <div class="flex items-center justify-start gap-2">
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+            <span class="section-label">Client Voice</span>
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+          </div>
+          <p class="mt-4 text-[13px] leading-[1.6] text-white/85 sm:text-[13.5px]">
+            "Every session with Victoria feels like a reset for both my skin and my mind.
+            My face looks lifted and rested — people keep asking what I've changed."
+          </p>
+          <p class="mt-4 text-sm">
+            <span class="font-medium text-white">A happy client</span><span class="text-white/60"> — El Gouna</span>
+          </p>
+        </div>
+
+        <!-- Stat card -->
+        <div class="glow-card flex min-h-[260px] flex-col items-center justify-center rounded-2xl p-5 md:p-6">
+          <div class="glow bronze" style="top:auto; bottom:-20%; right:-10%;"></div>
+          <div class="glow cream"></div>
+          <div class="relative z-10 flex flex-1 items-center justify-center">
+            <span class="text-5xl font-light tracking-tight drop-shadow-lg sm:text-6xl md:text-7xl lg:text-[88px]">10+</span>
+          </div>
+          <p class="relative z-10 mt-auto text-center text-sm text-white/85">Years of holistic skin &amp; body care</p>
+        </div>
+      </div>
+
+      <!-- ---- Column 3 ---- -->
+      <div class="grid gap-4 md:col-span-2 md:gap-5 lg:col-span-1" style="grid-template-rows: 1fr auto;">
+
+        <!-- Treatments marquee -->
+        <div class="glow-card flex min-h-[300px] flex-col justify-between rounded-2xl p-5 md:p-6">
+          <div class="glow rose" style="top:-20%; left:-10%; bottom:auto;"></div>
+          <div class="glow bronze" style="top:auto; bottom:-15%;"></div>
+
+          <div class="relative z-10 flex items-center justify-center gap-2">
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+            <span class="section-label">The Holistic Touch</span>
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+          </div>
+
+          <div class="relative z-10 flex flex-col gap-3">
+            <div class="marquee-mask w-full overflow-hidden">
+              <div class="animate-marquee-left flex w-max gap-3" id="marquee-1"></div>
+            </div>
+            <div class="marquee-mask w-full overflow-hidden">
+              <div class="animate-marquee-right flex w-max gap-3" id="marquee-2"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Reach Me -->
+        <div class="noise-overlay relative overflow-hidden rounded-2xl bg-[#4a3a31] p-5 md:p-6">
+          <a href="https://wa.me/200000000000" aria-label="Message Victoria on WhatsApp"
+             class="liquid-glass absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-full transition-opacity hover:opacity-80">
+            <i data-lucide="arrow-up-right" class="h-4 w-4 text-white" stroke-width="1.5"></i>
+          </a>
+          <div class="flex items-center justify-start gap-2">
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+            <span class="section-label">Reach Me</span>
+            <i data-lucide="sparkle" class="h-3 w-3 text-white/70" stroke-width="1.5"></i>
+          </div>
+          <div class="mt-4 space-y-1.5 text-sm">
+            <p class="text-white">El Gouna, Egypt</p>
+            <p class="text-white/60">WhatsApp: +20 000 000 0000</p>
+            <p class="text-white/60">hello@victoriavasilyeva.com</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= Footer ================= -->
+    <footer class="mt-6 flex items-center justify-between text-[11px] text-white/35 sm:mt-8">
+      <span>© 2026 Victoria Vasilyeva — Holistic Beauty</span>
+      <span>El Gouna · Egypt</span>
+    </footer>
+  </section>
+
+  <script>
+    // Treatment icon marquees
+    const row1 = ["sparkles", "droplets", "flower-2", "leaf", "sun", "waves", "gem", "feather"];
+    const row2 = ["heart-pulse", "hand", "moon-star", "shell", "sparkles", "flower-2", "droplets", "leaf"];
+
+    function buildMarquee(id, icons) {
+      const el = document.getElementById(id);
+      [...icons, ...icons].forEach(name => {
+        const tile = document.createElement("div");
+        tile.className = "liquid-glass flex h-14 w-14 md:h-16 md:w-16 flex-none items-center justify-center rounded-xl";
+        tile.innerHTML = `<i data-lucide="${name}" class="h-6 w-6 text-white/90" stroke-width="1.5"></i>`;
+        el.appendChild(tile);
+      });
+    }
+    buildMarquee("marquee-1", row1);
+    buildMarquee("marquee-2", row2);
+    lucide.createIcons();
+  </script>
+</body>
+</html>
