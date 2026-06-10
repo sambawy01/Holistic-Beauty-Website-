@@ -1,4 +1,4 @@
-/* Desert Lagoon — motion choreography
+/* Amber Noir — motion choreography
    Progressive enhancement: page is fully readable with JS off or reduced motion. */
 (() => {
   // CSS gates the nav's hidden state behind .has-js so no-JS users always see it.
@@ -93,7 +93,7 @@
     });
   }
 
-  // ---- Setting parallax (water rising) ----
+  // ---- Setting parallax  ----
   gsap.fromTo(".setting-media img",
     { yPercent: -10 }, {
       yPercent: 10, ease: "none",
