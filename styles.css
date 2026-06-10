@@ -59,19 +59,39 @@ h2 {
   background-size: 240px 240px;
 }
 
-/* ===== Nav — light translucent bar, dark text ===== */
+/* ===== Nav — always visible. Base = solid light translucent bar, dark text.
+   On hero pages with JS, main.js toggles .visible when the hero leaves view:
+   the un-.visible state floats transparent over the hero with photo-legible
+   light text. Pages without a hero (blog) carry .nav-solid → always solid.
+   No-JS fallback: solid bar everywhere (legible on every section). ===== */
 .nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 50;
   display: flex; justify-content: space-between; align-items: center;
   padding: 16px 28px;
-  transition: opacity 0.5s var(--ease), transform 0.5s var(--ease);
+  transition: background-color 0.5s var(--ease), border-color 0.5s var(--ease),
+              color 0.5s var(--ease), text-shadow 0.5s var(--ease);
   background: rgba(250, 247, 242, 0.92);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   color: var(--ink);
 }
-.has-js .nav { opacity: 0; pointer-events: none; transform: translateY(-8px); }
-.has-js .nav.visible { opacity: 1; pointer-events: auto; transform: none; }
+/* Floating-over-hero state: transparent, light text over the photo scrim */
+.has-js .nav:not(.visible):not(.nav-solid) {
+  background: transparent;
+  border-bottom-color: transparent;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  color: var(--photo-ink);
+  text-shadow: 0 1px 10px rgba(26, 21, 17, 0.7);
+}
+.has-js .nav:not(.visible):not(.nav-solid) .nav-logo {
+  filter: drop-shadow(0 1px 6px rgba(26, 21, 17, 0.65)) drop-shadow(0 2px 16px rgba(26, 21, 17, 0.4));
+}
+.has-js .nav:not(.visible):not(.nav-solid) .nav-cta {
+  border-color: rgba(233, 205, 175, 0.8); color: var(--photo-ink);
+}
+.has-js .nav:not(.visible):not(.nav-solid) .nav-cta:hover {
+  background: rgba(244, 239, 231, 0.14);
+}
 .nav-brand { font-family: var(--serif); font-style: italic; font-size: 22px; }
 .nav-links { display: flex; gap: 28px; align-items: center; font-size: 12px; font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; }
 .nav-links a { white-space: nowrap; }
@@ -84,11 +104,11 @@ h2 {
   .nav-links { gap: 14px; font-size: 11px; }
   .nav-cta { padding: 6px 12px; }
 }
-@media (max-width: 360px) {
-  .nav-links a:nth-child(2) { display: none; } /* hide About on tiny screens */
+@media (max-width: 480px) {
+  .nav-links a:nth-child(2) { display: none; } /* hide About: keeps Journal + RU + Reserve and room for the logo */
 }
-@media (max-width: 430px) {
-  .nav-links a:nth-child(2):lang(ru) { display: none; } /* RU labels are longer — free room for the logo */
+@media (max-width: 400px) {
+  .nav-links a:nth-child(1):lang(ru) { display: none; } /* RU labels are longer — free room for the logo */
 }
 
 /* ===== Logo recolor: white script → deep warm brown on light backgrounds ===== */
@@ -106,6 +126,8 @@ h2 {
 .hero-wash {
   position: absolute; inset: 0;
   background:
+    /* top scrim: keeps the floating nav legible over the light upper photo */
+    linear-gradient(180deg, rgba(var(--scrim), 0.55) 0%, rgba(var(--scrim), 0) 26%),
     radial-gradient(ellipse 80% 70% at 50% 45%, rgba(var(--scrim), 0.6) 0%, rgba(var(--scrim), 0) 75%),
     linear-gradient(180deg, rgba(var(--scrim), 0.38) 0%, rgba(var(--scrim), 0.34) 45%, rgba(26, 21, 17, 0.94) 100%);
 }
@@ -429,4 +451,142 @@ html.tmodal-open { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tmodal-overlay, .tmodal { animation: none !important; }
+}
+
+/* ===== Journal ===== */
+/* Blog pages: no hero, no main.js — nav carries .nav-solid so the base solid
+   bar always shows. Pages are fully static; entrances are CSS-only. */
+
+.journal-main { padding-top: clamp(110px, 16vh, 170px); }
+.journal-head { margin-bottom: clamp(44px, 7vh, 76px); }
+.journal-title {
+  font-family: var(--serif); font-weight: 500;
+  font-size: clamp(44px, 6.5vw, 76px); line-height: 1.05;
+  letter-spacing: 0.005em; color: var(--ink);
+}
+.journal-desc { margin-top: 18px; font-size: 16px; line-height: 1.7; color: var(--ink-soft); max-width: 34em; }
+
+.journal-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 28px; padding-bottom: clamp(80px, 12vh, 140px);
+}
+@media (max-width: 1020px) { .journal-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { .journal-grid { grid-template-columns: 1fr; gap: 24px; } }
+
+.post-card {
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 14px rgba(58, 51, 44, 0.06);
+  transition: transform 0.45s var(--ease), box-shadow 0.45s var(--ease);
+}
+.post-card:hover { transform: translateY(-5px); box-shadow: 0 16px 40px rgba(58, 51, 44, 0.14); }
+.post-card:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 3px; }
+
+/* --- Image placeholder art: layered earthy gradient, line-art rings, serif
+   initial. Distinct tint per card; swap for real photography later. --- */
+.post-art {
+  position: relative; aspect-ratio: 16 / 10; overflow: hidden;
+  background:
+    radial-gradient(120% 95% at 84% 10%, var(--art-hi) 0%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(135deg, var(--art-a) 0%, var(--art-b) 100%);
+}
+.post-art::before {
+  content: ""; position: absolute; width: 58%; aspect-ratio: 1;
+  border-radius: 50%; border: 1px solid rgba(255, 253, 249, 0.55);
+  right: -13%; top: -36%;
+}
+.post-art::after {
+  content: ""; position: absolute; width: 36%; aspect-ratio: 1;
+  border-radius: 50%; border: 1px solid rgba(58, 51, 44, 0.18);
+  right: 13%; bottom: -19%;
+}
+.post-art-i {
+  position: absolute; left: 20px; bottom: -0.21em; z-index: 1;
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 132px; line-height: 1; color: rgba(58, 51, 44, 0.26);
+  user-select: none;
+}
+.post-art--1 { --art-a: #EBD3B8; --art-b: #C99D78; --art-hi: rgba(255, 250, 240, 0.65); }
+.post-art--2 { --art-a: #E3C0AC; --art-b: #A9745A; --art-hi: rgba(255, 243, 232, 0.6); }
+.post-art--3 { --art-a: #DDD9C2; --art-b: #A6A07F; --art-hi: rgba(255, 253, 242, 0.6); }
+.post-art--4 { --art-a: #EBD3A6; --art-b: #C09553; --art-hi: rgba(255, 249, 235, 0.6); }
+.post-art--5 { --art-a: #E2D8CB; --art-b: #A99880; --art-hi: rgba(255, 252, 247, 0.6); }
+.post-art--6 { --art-a: #DBA98E; --art-b: #8A5238; --art-hi: rgba(255, 238, 226, 0.55); }
+
+.post-body { display: flex; flex-direction: column; flex: 1; padding: 22px 22px 24px; }
+.post-meta {
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--clay-deep);
+}
+.post-title {
+  margin-top: 12px;
+  font-family: var(--serif); font-weight: 500;
+  font-size: 24px; line-height: 1.22; color: var(--ink); max-width: none;
+}
+.post-excerpt { margin-top: 12px; flex: 1; font-size: 14.5px; line-height: 1.65; color: var(--ink-soft); }
+.post-read {
+  margin-top: 20px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--clay-deep);
+}
+.post-card:hover .post-read { text-decoration: underline; text-underline-offset: 4px; }
+
+/* --- Article reading layout --- */
+.article-wrap { max-width: 760px; margin: 0 auto; padding: 0 24px clamp(80px, 12vh, 140px); }
+.article-back {
+  display: inline-block; margin-bottom: 28px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--clay-deep);
+}
+.article-back:hover { text-decoration: underline; text-underline-offset: 4px; }
+.article-art { aspect-ratio: 21 / 9; border-radius: 12px; }
+.article-art .post-art-i { font-size: 150px; }
+.article-meta { margin-top: 32px; }
+.article-title {
+  margin-top: 14px;
+  font-family: var(--serif); font-weight: 500;
+  font-size: clamp(33px, 5vw, 48px); line-height: 1.12;
+  letter-spacing: 0.005em; color: var(--ink);
+}
+.article-body { margin-top: 34px; max-width: 65ch; }
+.article-body p { font-size: 17px; line-height: 1.85; color: var(--ink); }
+.article-body p + p { margin-top: 1.35em; }
+.article-body h2 {
+  margin: 1.9em 0 0.85em;
+  font-size: clamp(25px, 3.2vw, 31px); line-height: 1.2; max-width: none;
+}
+
+/* --- Quiet end-of-article CTA row --- */
+.article-cta {
+  margin-top: clamp(56px, 9vh, 88px); padding-top: 38px;
+  border-top: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+}
+.article-cta-line {
+  width: 100%;
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: 20px; color: var(--ink-soft);
+}
+.article-cta .cta { margin-top: 0; padding: 13px 30px; }
+
+/* Footer used standalone on blog pages (no reserve band above it) */
+.footer-flat { margin-top: 0; background: var(--bg-3); }
+
+/* CSS-only entrance for cards and article (no main.js on blog pages) */
+@media (prefers-reduced-motion: no-preference) {
+  .post-card, .article-wrap > * { animation: journal-rise 0.8s var(--ease) backwards; }
+  .post-card:nth-child(2) { animation-delay: 0.07s; }
+  .post-card:nth-child(3) { animation-delay: 0.14s; }
+  .post-card:nth-child(4) { animation-delay: 0.21s; }
+  .post-card:nth-child(5) { animation-delay: 0.28s; }
+  .post-card:nth-child(6) { animation-delay: 0.35s; }
+  .article-wrap > *:nth-child(2) { animation-delay: 0.06s; }
+  .article-wrap > *:nth-child(3) { animation-delay: 0.12s; }
+  .article-wrap > *:nth-child(4) { animation-delay: 0.18s; }
+  .article-wrap > *:nth-child(n+5) { animation-delay: 0.24s; }
+}
+@keyframes journal-rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: none; }
 }
