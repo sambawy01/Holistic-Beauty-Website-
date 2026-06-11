@@ -281,7 +281,10 @@ async function sendNotificationEmail(
 ): Promise<{ sent: boolean; reason?: string }> {
   const { subject, text, html } = buildEmail(order);
   const apiKey = process.env.RESEND_API_KEY;
-  const to = process.env.NOTIFY_EMAIL || NOTIFY_EMAIL_DEFAULT;
+  const to = (process.env.NOTIFY_EMAIL || NOTIFY_EMAIL_DEFAULT)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (!apiKey) {
     // Graceful no-op: never break orders because email isn't configured.
@@ -298,7 +301,7 @@ async function sendNotificationEmail(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, text, html }),
+      body: JSON.stringify({ from: EMAIL_FROM, to, subject, text, html }),
     });
     if (!res.ok) {
       const body = await res.text();
