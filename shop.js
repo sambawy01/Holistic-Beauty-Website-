@@ -15,7 +15,7 @@
      `photo` points at a 900×900 JPEG in assets/img/shop/.
      `alt` is the per-language image description. If `photo` is null the
      card falls back to the tinted-gradient-and-initial placeholder art.
-     `desc` is short marketing copy (not rendered on cards yet).
+     `desc` is short marketing copy, rendered in the product detail modal.
      Prices: `egp` in Egyptian pounds, `rub` in roubles.
      ===================================================================== */
   var PRODUCTS = [
@@ -131,6 +131,7 @@
   var T = {
     en: {
       add: "Add to order",
+      view: "View details",
       decrease: "Decrease quantity",
       increase: "Increase quantity",
       qtyOf: "Quantity of",
@@ -176,6 +177,7 @@
     },
     ru: {
       add: "Добавить в заказ",
+      view: "Подробнее",
       decrease: "Уменьшить количество",
       increase: "Увеличить количество",
       qtyOf: "Количество:",
@@ -282,9 +284,9 @@
   var grid = document.getElementById("shop-grid");
   var actionEls = {}; // slug -> .shop-action element
 
-  function renderAction(slug) {
-    var holder = actionEls[slug];
-    if (!holder) return;
+  /* Fills any holder (card action area or product-modal action area) with the
+     Add button / qty stepper pair for a product. */
+  function fillAction(holder, slug) {
     var p = bySlug(slug);
     holder.textContent = "";
     if (!cart[slug]) {
@@ -322,32 +324,69 @@
     }
   }
 
+  /* Re-render the action area for a product on its card AND, when the product
+     detail modal is open on the same product, inside the modal — both views
+     stay in sync as quantities change. */
+  function renderAction(slug) {
+    if (actionEls[slug]) fillAction(actionEls[slug], slug);
+    if (pActionHolder && pSlug === slug) {
+      fillAction(pActionHolder, slug);
+      /* The re-render swaps Add ↔ stepper; if focus was on the removed
+         control, restore it inside the modal so the trap keeps working. */
+      if (pPanel && !pPanel.contains(document.activeElement)) {
+        var next = pActionHolder.querySelector("button");
+        if (next) next.focus();
+      }
+    }
+  }
+
+  /* Shared art builder — product photo over its tinted gradient (or the
+     serif-initial placeholder when no photo exists). */
+  function buildArt(p, cls, eager) {
+    var art = document.createElement("div");
+    art.className = cls;
+    art.style.setProperty("--tint-a", p.tintA);
+    art.style.setProperty("--tint-b", p.tintB);
+    if (p.photo) {
+      var img = document.createElement("img");
+      img.src = p.photo;
+      img.alt = (p.alt && p.alt[LANG]) || p.name[LANG];
+      img.width = 900;
+      img.height = 900;
+      if (!eager) img.loading = "lazy";
+      img.decoding = "async";
+      art.appendChild(img);
+    } else {
+      var ini = document.createElement("span");
+      ini.className = "shop-initial";
+      ini.setAttribute("aria-hidden", "true");
+      ini.textContent = p.initial[LANG];
+      art.appendChild(ini);
+    }
+    return art;
+  }
+
   function renderGrid() {
     if (!grid) return;
     PRODUCTS.forEach(function (p) {
       var card = document.createElement("article");
       card.className = "shop-card";
+      /* Whole card opens the product detail modal; the Add button / stepper
+         stays independently clickable (its holder stops propagation). */
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.setAttribute("aria-haspopup", "dialog");
+      card.setAttribute("aria-label", p.name[LANG] + " — " + T.view);
+      card.addEventListener("click", function () { openProduct(p.slug); });
+      card.addEventListener("keydown", function (ev) {
+        if (ev.target !== card) return;
+        if (ev.key === "Enter" || ev.key === " " || ev.key === "Spacebar") {
+          ev.preventDefault();
+          openProduct(p.slug);
+        }
+      });
 
-      var art = document.createElement("div");
-      art.className = "shop-art";
-      art.style.setProperty("--tint-a", p.tintA);
-      art.style.setProperty("--tint-b", p.tintB);
-      if (p.photo) {
-        var img = document.createElement("img");
-        img.src = p.photo;
-        img.alt = (p.alt && p.alt[LANG]) || p.name[LANG];
-        img.width = 900;
-        img.height = 900;
-        img.loading = "lazy";
-        img.decoding = "async";
-        art.appendChild(img);
-      } else {
-        var ini = document.createElement("span");
-        ini.className = "shop-initial";
-        ini.setAttribute("aria-hidden", "true");
-        ini.textContent = p.initial[LANG];
-        art.appendChild(ini);
-      }
+      var art = buildArt(p, "shop-art");
 
       var body = document.createElement("div");
       body.className = "shop-body";
@@ -365,6 +404,8 @@
       price.appendChild(small);
       var action = document.createElement("div");
       action.className = "shop-action";
+      /* Cart controls must not bubble up into the card's open-modal click. */
+      action.addEventListener("click", function (ev) { ev.stopPropagation(); });
       actionEls[p.slug] = action;
 
       body.appendChild(name);
@@ -376,6 +417,97 @@
       grid.appendChild(card);
       renderAction(p.slug);
     });
+  }
+
+  /* ---------- product detail modal ----------
+     Opened by clicking/keying a product card. Reuses the treatment-modal
+     visual language (scrim + blur overlay, --card sheet) and the shop-add /
+     shop-stepper controls, kept in sync with the card via renderAction. */
+  var pOverlay = null, pPanel = null, pActionHolder = null, pSlug = null, pLastFocus = null;
+
+  function pTrapKeydown(ev) {
+    if (ev.key === "Escape") { ev.preventDefault(); closeProduct(); return; }
+    if (ev.key !== "Tab") return;
+    var focusables = pPanel.querySelectorAll(
+      'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusables.length) return;
+    var first = focusables[0];
+    var last = focusables[focusables.length - 1];
+    var active = document.activeElement;
+    if (!pPanel.contains(active) || active === pPanel) {
+      ev.preventDefault();
+      (ev.shiftKey ? last : first).focus();
+      return;
+    }
+    if (ev.shiftKey && active === first) {
+      ev.preventDefault(); last.focus();
+    } else if (!ev.shiftKey && active === last) {
+      ev.preventDefault(); first.focus();
+    }
+  }
+
+  function openProduct(slug) {
+    var p = bySlug(slug);
+    if (!p) return;
+    if (pOverlay) closeProduct();
+    pLastFocus = document.activeElement;
+    pSlug = slug;
+
+    pOverlay = el("div", "pmodal-overlay");
+    pPanel = el("div", "pmodal");
+    pPanel.setAttribute("role", "dialog");
+    pPanel.setAttribute("aria-modal", "true");
+    pPanel.setAttribute("aria-labelledby", "pmodal-title");
+    pPanel.tabIndex = -1;
+
+    var close = el("button", "pmodal-close");
+    close.type = "button";
+    close.setAttribute("aria-label", T.close);
+    close.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 2l12 12M14 2L2 14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    close.addEventListener("click", closeProduct);
+
+    var art = buildArt(p, "pmodal-art", true);
+
+    var body = el("div", "pmodal-body");
+    var name = el("h2", "pmodal-title", p.name[LANG]);
+    name.id = "pmodal-title";
+    var sub = el("p", "pmodal-sub", p.sub[LANG]);
+    var desc = el("p", "pmodal-desc", (p.desc && p.desc[LANG]) || "");
+    var price = el("p", "pmodal-price", fmtEgp(p.egp) + " ");
+    price.appendChild(el("small", null, "· " + fmtRub(p.rub)));
+    pActionHolder = el("div", "pmodal-action");
+    fillAction(pActionHolder, slug);
+
+    body.appendChild(name);
+    body.appendChild(sub);
+    body.appendChild(desc);
+    body.appendChild(price);
+    body.appendChild(pActionHolder);
+    pPanel.appendChild(close);
+    pPanel.appendChild(art);
+    pPanel.appendChild(body);
+    pOverlay.appendChild(pPanel);
+
+    pOverlay.addEventListener("mousedown", function (ev) {
+      if (ev.target === pOverlay) closeProduct();
+    });
+    document.body.appendChild(pOverlay);
+    document.documentElement.classList.add("pmodal-open");
+    document.addEventListener("keydown", pTrapKeydown, true);
+    pPanel.focus();
+  }
+
+  function closeProduct() {
+    if (!pOverlay) return;
+    pOverlay.remove();
+    pOverlay = null;
+    pPanel = null;
+    pActionHolder = null;
+    pSlug = null;
+    document.documentElement.classList.remove("pmodal-open");
+    document.removeEventListener("keydown", pTrapKeydown, true);
+    if (pLastFocus && document.contains(pLastFocus)) pLastFocus.focus();
   }
 
   /* ---------- floating cart bar ---------- */

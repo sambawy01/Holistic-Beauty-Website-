@@ -30,13 +30,13 @@
         fallbackBook: "запишитесь онлайн",
       }
     : {
-        open: "Open chat with Vasili — Victoria's AI Assistant",
+        open: "Open chat with Vassili — Victoria's AI Assistant",
         close: "Close chat",
-        title: "Vasili — Victoria's AI Assistant",
+        title: "Vassili — Victoria's AI Assistant",
         placeholder: "Your question…",
         send: "Send",
-        greeting: "Hello! I'm Vasili, Victoria's AI assistant. Ask me anything about our treatments, prices, or skincare.",
-        teaserName: "Meet Vasili",
+        greeting: "Hello! I'm Vassili, Victoria's AI assistant. Ask me anything about our treatments, prices, or skincare.",
+        teaserName: "Meet Vassili",
         teaserLine: "Victoria's AI assistant — ask about treatments, prices & skincare",
         teaserDismiss: "Dismiss",
         fallbackPre: "I'm offline right now — email ",
@@ -67,7 +67,7 @@
     return n;
   };
 
-  // Launcher: serif-italic "V" monogram with a clay-pale sparkle — Vasili's mark.
+  // Launcher: serif-italic "V" monogram with a clay-pale sparkle — Vassili's mark.
   const launcher = el("button", "chat-launcher", { type: "button", "aria-label": T.open, "aria-expanded": "false" });
   launcher.innerHTML =
     '<svg viewBox="0 0 64 64" width="38" height="38" aria-hidden="true" focusable="false">' +
@@ -99,7 +99,7 @@
 
   // ---- Intro teaser: greets on every new visit; once dismissed or the chat is
   // opened it stays away for the rest of the browsing session (sessionStorage,
-  // not localStorage — the owner wants Vasili hard to miss for returning visitors). ----
+  // not localStorage — the owner wants Vassili hard to miss for returning visitors). ----
   const INTRO_KEY = "vv-vasili-intro-seen";
   const introSeen = () => {
     try { return sessionStorage.getItem(INTRO_KEY) === "1"; }
