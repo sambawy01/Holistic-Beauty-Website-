@@ -675,3 +675,270 @@ html.tmodal-open { overflow: hidden; }
   from { opacity: 0; transform: translateY(22px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ===== Studio Shop =====
+   Shop pages reuse the journal shell (.nav-solid, .journal-main, .journal-head).
+   Product cards are rendered by shop.js from the PLACEHOLDER data block; art
+   areas are earthy gradients + a serif initial, swap-ready for real photos
+   (drop an <img> in .shop-art and it covers the frame). */
+
+.shop-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 24px; padding-bottom: clamp(130px, 18vh, 200px); /* clearance for the cart bar */
+}
+@media (max-width: 1020px) { .shop-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 780px)  { .shop-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
+
+.shop-card {
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 14px rgba(58, 51, 44, 0.06);
+  transition: transform 0.45s var(--ease), box-shadow 0.45s var(--ease);
+}
+@media (hover: hover) {
+  .shop-card:hover { transform: translateY(-4px); box-shadow: 0 14px 36px rgba(58, 51, 44, 0.13); }
+}
+
+/* Placeholder art: per-card earthy gradient via --tint-a/--tint-b + serif initial */
+.shop-art {
+  position: relative; aspect-ratio: 1 / 1; overflow: hidden;
+  background: linear-gradient(165deg, var(--tint-a, var(--bg-2)), var(--tint-b, var(--bg-3)));
+  display: grid; place-items: center;
+}
+.shop-art::before { /* soft window light, keeps the placeholder from feeling flat */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(85% 65% at 28% 18%, rgba(255, 253, 249, 0.5), transparent 70%);
+}
+.shop-initial {
+  position: relative;
+  font-family: var(--serif); font-style: italic; font-weight: 500;
+  font-size: clamp(72px, 8.5vw, 110px); line-height: 1;
+  color: var(--clay-deep); opacity: 0.32; /* decorative, aria-hidden */
+  user-select: none; -webkit-user-select: none;
+}
+.shop-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.shop-body { display: flex; flex-direction: column; flex: 1; padding: 18px 18px 20px; }
+.shop-name {
+  font-family: var(--serif); font-weight: 500;
+  font-size: 21px; line-height: 1.2; color: var(--ink); max-width: none;
+}
+.shop-sub {
+  margin-top: 6px;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
+  color: var(--ink-soft);
+}
+.shop-price { margin-top: 12px; flex: 1; font-size: 15px; letter-spacing: 0.05em; color: var(--clay-deep); }
+.shop-price small { font-size: 12.5px; color: var(--ink-soft); }
+
+.shop-action { margin-top: 16px; min-height: 42px; display: flex; }
+.shop-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 42px; padding: 10px 24px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--clay); background: none; color: var(--clay-deep);
+  font-family: var(--sans); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  transition: background-color 0.3s, color 0.3s, border-color 0.3s;
+}
+.shop-add:hover { background: var(--clay-deep); border-color: var(--clay-deep); color: var(--bg); }
+@media (max-width: 780px) {
+  .shop-add { width: 100%; padding: 10px 12px; font-size: 11px; letter-spacing: 0.14em; white-space: nowrap; }
+}
+.shop-stepper {
+  display: inline-flex; align-items: center;
+  border: 1px solid var(--clay); border-radius: 999px; overflow: hidden;
+  background: var(--card);
+}
+.shop-step {
+  width: 42px; height: 42px; border: none; background: none; cursor: pointer;
+  font-family: var(--sans); font-size: 19px; line-height: 1; color: var(--clay-deep);
+  display: grid; place-items: center;
+  transition: background-color 0.3s;
+}
+.shop-step:hover { background: rgba(169, 116, 90, 0.12); }
+.shop-qty { min-width: 32px; text-align: center; font-size: 15px; font-weight: 600; color: var(--ink); }
+
+/* CSS-only entrance, mirrors the journal cards */
+@media (prefers-reduced-motion: no-preference) {
+  .shop-card { animation: journal-rise 0.8s var(--ease) backwards; }
+  .shop-card:nth-child(2) { animation-delay: 0.05s; }
+  .shop-card:nth-child(3) { animation-delay: 0.1s; }
+  .shop-card:nth-child(4) { animation-delay: 0.15s; }
+  .shop-card:nth-child(5) { animation-delay: 0.2s; }
+  .shop-card:nth-child(6) { animation-delay: 0.25s; }
+  .shop-card:nth-child(7) { animation-delay: 0.3s; }
+  .shop-card:nth-child(8) { animation-delay: 0.35s; }
+}
+
+/* --- Floating cart bar — bottom-center, below Vasili's z-80 launcher and
+   horizontally clear of it; on small screens it keeps a right gutter so the
+   two never collide. --- */
+.cart-bar {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 60;
+  display: inline-flex; align-items: center; gap: 12px;
+  max-width: min(560px, calc(100vw - 200px));
+  padding: 15px 28px; border: none; border-radius: 999px; cursor: pointer;
+  background: var(--clay-deep); color: var(--bg);
+  font-family: var(--sans); font-size: 13px; font-weight: 600; letter-spacing: 0.06em;
+  box-shadow: 0 14px 36px rgba(33, 27, 22, 0.35), inset 0 1px 0 rgba(255, 253, 249, 0.22);
+  transition: background-color 0.3s;
+  animation: cart-in 0.4s var(--ease);
+}
+.cart-bar:hover { background: #6F4029; }
+.cart-bar:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 3px; }
+.cart-bar[hidden] { display: none; }
+.cart-bar-sum { white-space: nowrap; }
+.cart-bar-cta { white-space: nowrap; text-transform: uppercase; letter-spacing: 0.16em; font-size: 11.5px; color: var(--bg); }
+@keyframes cart-in { from { opacity: 0; transform: translate(-50%, 14px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (max-width: 640px) {
+  .cart-bar {
+    left: 16px; right: 92px; bottom: 16px; transform: none;
+    max-width: none; justify-content: space-between; padding: 14px 20px;
+  }
+  @keyframes cart-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+}
+
+/* --- Order panel — same visual language as the treatment modal --- */
+html.order-open { overflow: hidden; }
+/* The panel focus-traps, so Vasili (z-80) would float unreachable above it —
+   hide the chat affordances while the order dialog is open. */
+html.order-open .chat-launcher,
+html.order-open .chat-teaser,
+html.order-open .chat-card { display: none; }
+.order-overlay {
+  position: fixed; inset: 0; z-index: 70;
+  display: grid; place-items: center; padding: 24px;
+  background: rgba(33, 27, 22, 0.55);
+  backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+  animation: tmodal-fade 0.3s var(--ease);
+}
+.order-overlay[hidden] { display: none; }
+.order-panel {
+  position: relative;
+  width: min(540px, 100%); max-height: min(86vh, 760px); overflow-y: auto;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: 36px 34px 32px;
+  box-shadow: 0 24px 70px rgba(33, 27, 22, 0.35);
+  animation: tmodal-in 0.4s var(--ease);
+}
+.order-panel:focus { outline: none; }
+.order-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 38px; height: 38px; border-radius: 50%;
+  background: none; border: none; cursor: pointer;
+  display: grid; place-items: center;
+  color: var(--ink-soft); transition: color 0.3s, background-color 0.3s;
+}
+.order-close:hover { color: var(--ink); background: var(--bg-2); }
+.order-title {
+  font-family: var(--serif); font-weight: 500;
+  font-size: clamp(26px, 4vw, 32px); line-height: 1.15;
+  color: var(--ink); padding-right: 34px; max-width: none;
+}
+.order-items { list-style: none; margin-top: 20px; border-top: 1px solid var(--line); }
+.order-items li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+  padding: 11px 0; border-bottom: 1px solid var(--line);
+  font-size: 14.5px; line-height: 1.5;
+}
+.order-item-name { color: var(--ink); }
+.order-item-qty { color: var(--ink-soft); font-size: 13px; }
+.order-item-price { margin-left: auto; white-space: nowrap; color: var(--clay-deep); }
+.order-total {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+  padding-top: 14px; font-size: 15.5px; font-weight: 600;
+}
+.order-total-sum { color: var(--clay-deep); white-space: nowrap; }
+.order-total-sum small { font-weight: 500; font-size: 12.5px; color: var(--ink-soft); }
+
+/* COD notice — bordered clay panel, same language as the booking policy panel */
+.cod-note {
+  margin-top: 20px; padding: 14px 16px;
+  border: 1px solid var(--clay); border-radius: 10px;
+  background: rgba(169, 116, 90, 0.08);
+  color: var(--clay-deep); font-size: 13.5px; line-height: 1.65;
+}
+
+.order-form { margin-top: 10px; }
+.order-field { margin-top: 16px; }
+.order-field label {
+  display: block; margin-bottom: 7px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--clay-deep);
+}
+.order-field input, .order-field textarea {
+  width: 100%; padding: 12px 14px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid rgba(58, 51, 44, 0.22); border-radius: 10px;
+  font-family: var(--sans); font-size: 15px; font-weight: 400; line-height: 1.5;
+}
+.order-field textarea { resize: vertical; min-height: 72px; }
+.order-field input::placeholder, .order-field textarea::placeholder { color: var(--ink-soft); opacity: 1; }
+.order-field input:focus, .order-field textarea:focus { outline: none; border-color: var(--clay-deep); }
+.field-error { display: none; margin-top: 6px; font-size: 12.5px; color: #9C2F1D; }
+.order-field.invalid input, .order-field.invalid textarea { border-color: #9C2F1D; }
+.order-field.invalid .field-error { display: block; }
+
+.order-submit {
+  display: block; width: 100%; margin-top: 24px;
+  padding: 15px 34px; border: none; border-radius: 999px; cursor: pointer;
+  background: var(--clay-deep); color: var(--bg);
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  letter-spacing: 0.22em; text-transform: uppercase;
+  transition: background-color 0.3s, opacity 0.3s;
+}
+.order-submit:hover { background: #6F4029; }
+.order-submit:disabled { opacity: 0.6; cursor: default; }
+
+/* Failure bubble — graceful mailto fallback when the order API is unreachable */
+.order-fail {
+  margin-top: 16px; padding: 13px 15px;
+  border: 1px solid rgba(156, 47, 29, 0.45); border-radius: 10px;
+  background: rgba(156, 47, 29, 0.06);
+  color: #8E2B1A; font-size: 13.5px; line-height: 1.65;
+}
+.order-fail[hidden] { display: none; }
+.order-fail a { color: inherit; text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+
+.order-success { text-align: center; padding: 26px 4px 12px; }
+.order-success-mark {
+  width: 56px; height: 56px; margin: 0 auto 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(169, 116, 90, 0.13); color: var(--clay-deep);
+  font-size: 24px;
+}
+.order-success-title {
+  font-family: var(--serif); font-weight: 500;
+  font-size: 27px; line-height: 1.25; color: var(--ink); max-width: none;
+}
+.order-success-line { margin-top: 12px; font-size: 14.5px; line-height: 1.7; color: var(--ink-soft); }
+.order-success .order-submit { margin-top: 26px; }
+
+@media (max-width: 560px) {
+  /* Bottom sheet on small screens, like the treatment modal */
+  .order-overlay { padding: 0; align-items: end; place-items: end stretch; }
+  .order-panel {
+    width: 100%; max-height: 90vh; max-height: 90svh;
+    border-radius: 18px 18px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
+    padding: 28px 22px calc(26px + env(safe-area-inset-bottom));
+    animation: tmodal-up 0.45s var(--ease);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cart-bar, .order-overlay, .order-panel { animation: none !important; }
+  .shop-card { animation: none !important; transition: none !important; }
+  .shop-card:hover { transform: none; }
+  .shop-art img { transition: none; }
+}
+
+/* Six links now (Treatments · About · Journal · Shop · lang · CTA): extend the
+   progressive hiding so Shop stays reachable on narrow phones. */
+@media (max-width: 480px) {
+  .nav-links a:nth-child(1):lang(ru) { display: none; } /* Процедуры — RU rows are longer */
+}
+@media (max-width: 430px) {
+  .nav-links a:nth-child(1) { display: none; } /* Treatments — Journal · Shop · lang · CTA remain */
+}
