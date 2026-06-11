@@ -91,9 +91,11 @@ interface FormState {
   enName: string;
   enSub: string;
   enDesc: string;
+  enUsage: string;
   ruName: string;
   ruSub: string;
   ruDesc: string;
+  ruUsage: string;
   priceEgp: string;
   priceRub: string;
   quantity: string; // "" = untracked
@@ -108,9 +110,11 @@ function toFormState(p: Product | null): FormState {
     enName: p?.en.name ?? "",
     enSub: p?.en.sub ?? "",
     enDesc: p?.en.desc ?? "",
+    enUsage: p?.usage?.en ?? "",
     ruName: p?.ru.name ?? "",
     ruSub: p?.ru.sub ?? "",
     ruDesc: p?.ru.desc ?? "",
+    ruUsage: p?.usage?.ru ?? "",
     priceEgp: p ? String(p.priceEgp) : "",
     priceRub: p ? String(p.priceRub) : "",
     quantity: p && p.quantity !== null ? String(p.quantity) : "",
@@ -202,6 +206,7 @@ function ProductForm({
     const body = {
       en: { name: form.enName.trim(), sub: form.enSub.trim(), desc: form.enDesc.trim() },
       ru: { name: form.ruName.trim(), sub: form.ruSub.trim(), desc: form.ruDesc.trim() },
+      usage: { en: form.enUsage.trim(), ru: form.ruUsage.trim() },
       priceEgp,
       priceRub,
       quantity,
@@ -260,6 +265,16 @@ function ProductForm({
             <label className={labelCls}>Description (EN)</label>
             <textarea className={inputCls} rows={3} value={form.enDesc} onChange={(e) => set({ enDesc: e.target.value })} />
           </div>
+          <div>
+            <label className={labelCls}>Usage instructions (EN)</label>
+            <textarea
+              className={inputCls}
+              rows={3}
+              value={form.enUsage}
+              placeholder="Manufacturer's application directions — how and when to use"
+              onChange={(e) => set({ enUsage: e.target.value })}
+            />
+          </div>
         </div>
         <div className="space-y-3">
           <div>
@@ -273,6 +288,16 @@ function ProductForm({
           <div>
             <label className={labelCls}>Description (RU)</label>
             <textarea className={inputCls} rows={3} value={form.ruDesc} onChange={(e) => set({ ruDesc: e.target.value })} />
+          </div>
+          <div>
+            <label className={labelCls}>Usage instructions (RU)</label>
+            <textarea
+              className={inputCls}
+              rows={3}
+              value={form.ruUsage}
+              placeholder="Инструкция производителя по применению"
+              onChange={(e) => set({ ruUsage: e.target.value })}
+            />
           </div>
         </div>
       </div>

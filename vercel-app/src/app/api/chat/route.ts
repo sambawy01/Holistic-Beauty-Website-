@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSystemPrompt } from "@/lib/concierge-prompt";
+import { getCatalog, SEED, type Product } from "@/lib/catalog";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
 
 export const runtime = "nodejs";
@@ -120,7 +121,22 @@ export async function POST(request: NextRequest) {
   }
 
   const language: "en" | "ru" = lang === "ru" ? "ru" : "en";
-  const systemPrompt = buildSystemPrompt(language);
+
+  // Live shop knowledge: prices, availability and the manufacturer's usage
+  // directions come from the dynamic catalog. A blob failure must never
+  // break the concierge — degrade to the built-in SEED catalog (which also
+  // carries usage texts).
+  let catalog: readonly Product[];
+  try {
+    catalog = await getCatalog();
+  } catch (error) {
+    console.error("[chat] Catalog read failed — using seed:", error);
+    catalog = SEED;
+  }
+  const systemPrompt = buildSystemPrompt(
+    language,
+    catalog.filter((p) => p.active)
+  );
 
   // Ollama Cloud when a key is configured, otherwise local ollama
   // (local dev: the machine's ollama is signed into Ollama Cloud,

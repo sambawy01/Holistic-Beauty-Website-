@@ -41,6 +41,12 @@ export interface Product {
   soldOut: boolean;
   /** Hidden products stay in the catalog but never reach the public API. */
   active: boolean;
+  /**
+   * Manufacturer usage/application directions (optional, editable in /admin).
+   * Surfaced to the AI concierge and the public API so clients can be told
+   * how to use what they bought — "according to the manufacturer".
+   */
+  usage?: { en: string; ru: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +62,8 @@ export interface PublicProduct {
   photo: string;
   alt: { en: string; ru: string };
   soldOut: boolean;
+  /** Manufacturer usage directions, when Victoria has provided them. */
+  usage?: { en: string; ru: string };
 }
 
 export const CATALOG_PATHNAME = "catalog/products.json";
@@ -148,6 +156,39 @@ const SEED_COPY: Record<
   },
 };
 
+/**
+ * Manufacturer "Application method" directions, condensed faithfully from
+ * the Onmacabim product pages on onmacabim-prof.com/en/product/* (the same
+ * origin as the seed catalog). No invented claims — wording stays within
+ * what the manufacturer publishes; RU is a natural translation.
+ */
+const SEED_USAGE: Record<string, { en: string; ru: string }> = {
+  "tohar-hamidbar-concentrate": {
+    en: "Can be used year-round. In the evening, apply to cleansed face and do not rinse off. During periods of active sun exposure, sunscreen with at least SPF 15 is required. On problem skin a temporary tingling, itching, burning or redness is possible on application — per the manufacturer these reactions pass on their own.",
+    ru: "Можно использовать круглый год. Вечером нанесите на очищенную кожу лица и не смывайте. В период активного солнца обязательно пользуйтесь солнцезащитным средством с SPF не ниже 15. На проблемной коже при нанесении возможны временное покалывание, зуд, жжение или покраснение — по данным производителя, эти реакции проходят самостоятельно.",
+  },
+  "nd-neck-decollete-cream": {
+    en: "Apply to the cleansed skin of the neck and décolleté with light massaging movements until fully absorbed, for intensive moisturizing and nourishment.",
+    ru: "Наносите на очищенную кожу шеи и декольте лёгкими массирующими движениями до полного впитывания — для интенсивного увлажнения и питания.",
+  },
+  "vitamin-c-mask": {
+    en: "Apply a thin layer onto cleansed skin and rinse off after 15–20 minutes. Use 2–3 times a week.",
+    ru: "Нанесите тонким слоем на очищенную кожу и смойте через 15–20 минут. Используйте 2–3 раза в неделю.",
+  },
+  "vitality-spf15-moisturizer": {
+    en: "Apply in the morning to clean skin of the face and neck, spreading with light massaging movements. Ideally suited as a makeup base; the manufacturer also recommends it for use as a serum.",
+    ru: "Утром нанесите на чистую кожу лица и шеи, распределяя лёгкими массирующими движениями. Идеально подходит как база под макияж; производитель также рекомендует использовать его как сыворотку.",
+  },
+  "nomela-serum": {
+    en: "Apply morning and evening to thoroughly cleansed skin, before your cream. During the day, use a sunscreen with at least SPF 30. Suitable for daily use, all skin types, with no seasonal limitations.",
+    ru: "Наносите утром и вечером на тщательно очищенную кожу перед кремом. Днём используйте солнцезащитное средство с SPF не ниже 30. Подходит для ежедневного применения, для всех типов кожи, без сезонных ограничений.",
+  },
+  "moisturizer-normal-dry": {
+    en: "In the morning, after cleansing and toning, apply over the face, neck and décolleté area.",
+    ru: "Утром, после очищения и тонизирования, нанесите на лицо, шею и зону декольте.",
+  },
+};
+
 /** Short names for the catalog (without the line/size suffix that lives in `sub`). */
 const SEED_SHORT_NAMES: Record<string, { en: string; ru: string }> = {
   "tohar-hamidbar-concentrate": { en: "Tohar Hamidbar No.2 Herbal Concentrate", ru: "Травяной концентрат Tohar Hamidbar №2" },
@@ -177,6 +218,7 @@ export const SEED: readonly Product[] = SHOP_PRODUCTS.map((p) => {
     priceRub: p.priceRub,
     photo: copy?.photo ?? "",
     alt: copy?.alt ?? { en: "", ru: "" },
+    ...(SEED_USAGE[p.slug] ? { usage: SEED_USAGE[p.slug] } : {}),
     quantity: SEED_QUANTITY,
     soldOut: false,
     active: true,
@@ -191,6 +233,7 @@ function cloneSeed(): Product[] {
     en: { ...p.en },
     ru: { ...p.ru },
     alt: { ...p.alt },
+    ...(p.usage ? { usage: { ...p.usage } } : {}),
   }));
 }
 
@@ -212,6 +255,9 @@ export function toPublicProduct(p: Product): PublicProduct {
     photo: p.photo,
     alt: { ...p.alt },
     soldOut: effectiveSoldOut(p),
+    ...(p.usage && (p.usage.en || p.usage.ru)
+      ? { usage: { ...p.usage } }
+      : {}),
   };
 }
 
@@ -264,6 +310,30 @@ export async function decrementQuantities(
     const product = catalog.find((p) => p.slug === slug);
     if (product && typeof product.quantity === "number") {
       product.quantity = Math.max(0, product.quantity - qty);
+      product.updatedAt = now;
+      changed = true;
+    }
+  }
+  if (changed) await saveCatalog(catalog);
+}
+
+/**
+ * Restore tracked stock when an order is cancelled (read-modify-write).
+ * The mirror of `decrementQuantities`: quantities are added back only for
+ * items that still exist in the catalog AND still track stock — deleted
+ * products and untracked (`quantity: null`) ones are skipped. Races at this
+ * volume are acceptable.
+ */
+export async function restoreQuantities(
+  items: { slug: string; qty: number }[]
+): Promise<void> {
+  const catalog = await getCatalog();
+  const now = new Date().toISOString();
+  let changed = false;
+  for (const { slug, qty } of items) {
+    const product = catalog.find((p) => p.slug === slug);
+    if (product && typeof product.quantity === "number") {
+      product.quantity = product.quantity + qty;
       product.updatedAt = now;
       changed = true;
     }

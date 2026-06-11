@@ -1,13 +1,22 @@
 import { formatEgp, formatRub } from "@/lib/shop-products";
-import type { StoredOrder, StoredOrderItem } from "@/lib/orders";
+import type {
+  CancelReason,
+  CancelReasonCode,
+  StoredOrder,
+  StoredOrderItem,
+} from "@/lib/orders";
 
 /**
- * Client-facing status emails for shop orders (shipped / delivered).
+ * Client-facing status emails for shop orders
+ * (confirmed / shipped / delivered / cancelled).
  *
  * Mirrors the buyer-confirmation email in /api/order: same dark logo band
  * header, same earthy palette, same Resend REST pattern. Lang-aware (en/ru)
  * from the order's stored `lang`. Sent from bookings@ with reply-to
  * victoria@ so replies land in Victoria's inbox.
+ *
+ * Cancellation emails include the reason: known reason codes get a localized
+ * label; free text ("other" or an extra note) is passed through verbatim.
  *
  * Failure model: `sendOrderStatusEmail` never throws — a mail failure must
  * never roll back or fail the status update. Callers get { sent, reason? }.
@@ -16,8 +25,40 @@ import type { StoredOrder, StoredOrderItem } from "@/lib/orders";
 const EMAIL_FROM =
   "Victoria Vasilyeva Holistic Beauty <bookings@victoriaholisticbeauty.com>";
 const REPLY_TO = "victoria@victoriaholisticbeauty.com";
+const CONTACT_EMAIL = "victoria@victoriaholisticbeauty.com";
 
-type EmailStatus = "shipped" | "delivered";
+export type EmailStatus = "confirmed" | "shipped" | "delivered" | "cancelled";
+
+/** Localized labels for the known cancellation reason codes. */
+const CANCEL_REASON_LABELS: Record<
+  Exclude<CancelReasonCode, "other">,
+  { en: string; ru: string }
+> = {
+  "out-of-stock": { en: "Out of stock", ru: "Товара нет в наличии" },
+  unreachable: {
+    en: "Could not reach the client",
+    ru: "Не удалось связаться с клиентом",
+  },
+  "client-request": {
+    en: "Cancelled at client's request",
+    ru: "Отменён по просьбе клиента",
+  },
+  "delivery-area": {
+    en: "Delivery area not covered",
+    ru: "Зона доставки не обслуживается",
+  },
+};
+
+/** "Label — free text" in the order's language; free text verbatim. */
+function cancelReasonText(reason: CancelReason | undefined, ru: boolean): string {
+  if (!reason) return ru ? "не указана" : "not specified";
+  if (reason.code === "other") {
+    return reason.note || (ru ? "не указана" : "not specified");
+  }
+  const label = CANCEL_REASON_LABELS[reason.code];
+  const base = ru ? label.ru : label.en;
+  return reason.note ? `${base} — ${reason.note}` : base;
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -41,9 +82,86 @@ interface StatusCopy {
   signoff: string;
 }
 
-function copyFor(order: StoredOrder, status: EmailStatus): StatusCopy {
+function copyFor(
+  order: StoredOrder,
+  status: EmailStatus,
+  cancelReason?: CancelReason
+): StatusCopy {
   const ru = order.lang === "ru";
   const n = order.orderNumber;
+
+  if (status === "confirmed") {
+    return ru
+      ? {
+          subject: `Ваш заказ ${n} подтверждён`,
+          heading: "Заказ подтверждён",
+          greeting: `Здравствуйте, ${order.name}!`,
+          paragraphs: [
+            `Хорошие новости — ваш заказ ${n} подтверждён. Наша команда свяжется с вами в WhatsApp, чтобы подтвердить время доставки. Оплата при получении (наличными).`,
+          ],
+          recapTitle: "Состав заказа",
+          product: "Товар",
+          qty: "Кол-во",
+          lineTotal: "Сумма",
+          total: "Итого",
+          footnote: "Доставка по Египту в течение 24–72 часов.",
+          signoff: "С теплом,",
+        }
+      : {
+          subject: `Your order ${n} is confirmed`,
+          heading: "Your order is confirmed",
+          greeting: `Hello ${order.name},`,
+          paragraphs: [
+            `Good news — your order ${n} is confirmed. Our team will contact you via WhatsApp to confirm the delivery time. Payment cash on delivery.`,
+          ],
+          recapTitle: "Order recap",
+          product: "Product",
+          qty: "Qty",
+          lineTotal: "Line total",
+          total: "Total",
+          footnote: "Delivery within 24–72 hours across Egypt.",
+          signoff: "Warmly,",
+        };
+  }
+
+  if (status === "cancelled") {
+    const reasonText = cancelReasonText(cancelReason, ru);
+    return ru
+      ? {
+          subject: `Ваш заказ ${n} отменён`,
+          heading: "Заказ отменён",
+          greeting: `Здравствуйте, ${order.name}!`,
+          paragraphs: [
+            `К сожалению, ваш заказ ${n} был отменён.`,
+            `Причина: ${reasonText}.`,
+            `Если это стало неожиданностью, напишите нам на ${CONTACT_EMAIL} или спросите Василия на нашем сайте.`,
+          ],
+          recapTitle: "Состав заказа",
+          product: "Товар",
+          qty: "Кол-во",
+          lineTotal: "Сумма",
+          total: "Итого",
+          footnote: null,
+          signoff: "С теплом,",
+        }
+      : {
+          subject: `Your order ${n} has been cancelled`,
+          heading: "Your order has been cancelled",
+          greeting: `Hello ${order.name},`,
+          paragraphs: [
+            `We're sorry — your order ${n} has been cancelled.`,
+            `Reason: ${reasonText}.`,
+            `If this is unexpected, write to ${CONTACT_EMAIL} or ask Vassili on our site.`,
+          ],
+          recapTitle: "Order recap",
+          product: "Product",
+          qty: "Qty",
+          lineTotal: "Line total",
+          total: "Total",
+          footnote: null,
+          signoff: "Warmly,",
+        };
+  }
 
   if (status === "shipped") {
     return ru
@@ -116,9 +234,10 @@ function copyFor(order: StoredOrder, status: EmailStatus): StatusCopy {
 
 export function buildOrderStatusEmail(
   order: StoredOrder,
-  status: EmailStatus
+  status: EmailStatus,
+  cancelReason?: CancelReason
 ): { subject: string; text: string; html: string } {
-  const t = copyFor(order, status);
+  const t = copyFor(order, status, cancelReason);
   const ru = order.lang === "ru";
   const itemName = (item: StoredOrderItem) =>
     ru ? item.names.ru : item.names.en;
@@ -208,13 +327,18 @@ export function buildOrderStatusEmail(
  */
 export async function sendOrderStatusEmail(
   order: StoredOrder,
-  status: EmailStatus
+  status: EmailStatus,
+  cancelReason?: CancelReason
 ): Promise<{ sent: boolean; reason?: string }> {
   if (!order.email) {
     return { sent: false, reason: "no-buyer-email" };
   }
 
-  const { subject, text, html } = buildOrderStatusEmail(order, status);
+  const { subject, text, html } = buildOrderStatusEmail(
+    order,
+    status,
+    cancelReason
+  );
   const apiKey = process.env.RESEND_API_KEY;
 
   if (!apiKey) {

@@ -12,6 +12,7 @@ import type { Product, ProductCopy } from "@/lib/catalog";
 const MAX_NAME = 160;
 const MAX_SUB = 160;
 const MAX_DESC = 1200;
+const MAX_USAGE = 1200;
 const MAX_ALT = 300;
 const MAX_PHOTO = 600;
 const MAX_PRICE = 10_000_000;
@@ -24,6 +25,8 @@ export interface ProductInput {
   priceRub?: number;
   photo?: string;
   alt?: { en: string; ru: string };
+  /** Manufacturer usage directions; both empty strings = none. */
+  usage?: { en: string; ru: string };
   quantity?: number | null;
   soldOut?: boolean;
   active?: boolean;
@@ -136,6 +139,17 @@ export function validateProductInput(
     }
   }
 
+  if (b.usage !== undefined) {
+    const o = (b.usage ?? {}) as Record<string, unknown>;
+    const usageEn = str(o.en) ?? "";
+    const usageRu = str(o.ru) ?? "";
+    if (usageEn.length > MAX_USAGE || usageRu.length > MAX_USAGE) {
+      fields.usage = `usage texts must be at most ${MAX_USAGE} characters`;
+    } else {
+      value.usage = { en: usageEn, ru: usageRu };
+    }
+  }
+
   if (b.quantity !== undefined) {
     if (b.quantity === null) {
       value.quantity = null;
@@ -175,6 +189,7 @@ export function applyProductInput(product: Product, input: ProductInput): Produc
     ...(input.priceRub !== undefined ? { priceRub: input.priceRub } : {}),
     ...(input.photo !== undefined ? { photo: input.photo } : {}),
     ...(input.alt !== undefined ? { alt: input.alt } : {}),
+    ...(input.usage !== undefined ? { usage: input.usage } : {}),
     ...(input.quantity !== undefined ? { quantity: input.quantity } : {}),
     ...(input.soldOut !== undefined ? { soldOut: input.soldOut } : {}),
     ...(input.active !== undefined ? { active: input.active } : {}),

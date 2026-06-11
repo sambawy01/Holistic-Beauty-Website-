@@ -1,6 +1,18 @@
+import {
+  effectiveSoldOut,
+  formatEgp,
+  formatRub,
+  type Product,
+} from "@/lib/catalog";
+
 /**
  * Single source of truth for the AI concierge knowledge base and system prompt.
  * Victoria Vasilyeva Holistic Beauty — services, prices, durations, brand facts.
+ *
+ * Shop products are injected DYNAMICALLY: /api/chat loads the live catalog
+ * (falling back to the built-in SEED on a blob failure) and passes it to
+ * `buildSystemPrompt`, so Vassili always knows current prices, availability
+ * and the manufacturer's usage directions.
  */
 
 export interface ServicePrice {
@@ -94,13 +106,7 @@ export const BRAND = {
     "Victoria's credentials: physician by training — Pavlov First Saint Petersburg State Medical University (ПСПбГМУ им. акад. И. П. Павлова): degree in General Medicine / internal medicine physician (терапевт), 2013; surgical residency (ординатура, хирург), 2015; professional retraining in nursing for cosmetology (сестринское дело в косметологии), 2015–2016. " +
     "She is recognized for serving celebrities and stars from Egypt and the Middle East region (never name specific clients — confidentiality). " +
     "Victoria provides services to female clients only — politely inform male inquirers. " +
-    "Studio shop products — Onmacabim professional cosmetics (cash on delivery, 24–72h delivery across Egypt): " +
-    "Tohar Hamidbar No.2 Herbal Concentrate, DM line 150ml — E£1,450 / 2 000₽; " +
-    "N.D Cream for Neck & Décolleté, Vivant line 50ml — E£1,250 / 1 750₽; " +
-    "Nourishing Skin Mask Vitamin C, VC line 50ml — E£2,300 / 3 200₽; " +
-    "Vitality Moisturizer SPF 15, Oxygen line 50ml — E£1,150 / 1 600₽; " +
-    "NoMela Facial Serum, Luna whitening series 50ml — E£1,350 / 1 900₽; " +
-    "Moisturizer for Normal to Dry Skin, ST Cells line 50ml — E£4,850 / 6 700₽.",
+    "The studio shop sells Onmacabim professional cosmetics (cash on delivery, 24–72h delivery across Egypt) — see SHOP PRODUCTS.",
   whatsappNumber: "+7 938 888 34 31",
   whatsappLink: "https://wa.me/79388883431",
   bookingLink: "https://book.victoriaholisticbeauty.com/book",
@@ -117,18 +123,48 @@ function formatService(s: Service): string {
   return `- ${s.nameEn} / ${s.nameRu} — ${prices}`;
 }
 
+/** One prompt line per shop product: names, price, availability, copy, usage. */
+function formatShopProduct(p: Product): string {
+  const sub = p.en.sub ? ` (${p.en.sub} / ${p.ru.sub})` : "";
+  const availability = effectiveSoldOut(p)
+    ? "SOLD OUT — currently unavailable, cannot be ordered right now"
+    : "in stock";
+  const desc =
+    p.en.desc || p.ru.desc
+      ? ` Description: ${[p.en.desc, p.ru.desc].filter(Boolean).join(" / RU: ")}`
+      : "";
+  const usage =
+    p.usage && (p.usage.en || p.usage.ru)
+      ? ` USAGE (manufacturer's directions): ${[p.usage.en, p.usage.ru].filter(Boolean).join(" / RU: ")}`
+      : "";
+  return `- ${p.en.name} / ${p.ru.name}${sub} — ${formatEgp(p.priceEgp)} / ${formatRub(p.priceRub)} — ${availability}.${desc}${usage}`;
+}
+
 /**
  * Build the domain-restricted system prompt for the concierge.
- * `lang` is the UI language hint; the model must still follow the user's actual language.
+ * `lang` is the UI language hint; the model must still follow the user's
+ * actual language. `products` is the live shop catalog (active products) —
+ * /api/chat passes the dynamic catalog or its SEED fallback.
  */
-export function buildSystemPrompt(lang: "en" | "ru"): string {
+export function buildSystemPrompt(
+  lang: "en" | "ru",
+  products: readonly Product[] = []
+): string {
+  const shopSection =
+    products.length > 0
+      ? `
+
+SHOP PRODUCTS (Onmacabim professional cosmetics — cash on delivery, 24–72h delivery across Egypt; EN / RU names, Egyptian Pounds / Russian Rubles):
+${products.map(formatShopProduct).join("\n")}`
+      : "";
+
   return `You are "Vassili", Victoria's AI assistant for ${BRAND.name}. When asked who you are, introduce yourself as Vassili, Victoria's AI assistant.
 
 ABOUT THE STUDIO:
 ${BRAND.facts}
 
 SERVICES (EN / RU — Egyptian Pounds / Russian Rubles, with durations):
-${SERVICES.map(formatService).join("\n")}
+${SERVICES.map(formatService).join("\n")}${shopSection}
 
 BOOKING & CONTACT:
 Clients book treatments directly online at ${BRAND.bookingLink} (no intermediary needed).
@@ -136,7 +172,7 @@ General contact email: ${BRAND.contactEmail}.
 Victoria's personal WhatsApp ${BRAND.whatsappNumber} (${BRAND.whatsappLink}) is for personal consultations ONLY — see rule 6.
 
 STRICT RULES:
-1. Answer ONLY about these treatments, skincare advice related to them, their prices, durations, and booking. For anything off-topic, politely decline and steer the conversation back to the studio's services.
+1. Answer ONLY about these treatments, the shop products, skincare advice related to them, their prices, durations, availability, and booking. For anything off-topic, politely decline and steer the conversation back to the studio's services.
 2. Reply in the user's language. (UI language hint: ${lang === "ru" ? "Russian" : "English"} — but always follow the language the user actually writes in.)
 3. Keep answers to 120 words or fewer.
 4. NEVER invent services, prices, durations, or medical claims. Only use the exact data above.
@@ -144,5 +180,6 @@ STRICT RULES:
 6. Offer Victoria's WhatsApp (${BRAND.whatsappNumber}, ${BRAND.whatsappLink}) ONLY in these two cases — and then do so warmly, as a personal consultation with Victoria:
    (a) the question requires a medical opinion or individual assessment (skin conditions, contraindications, pregnancy, medications, allergies, etc.);
    (b) the client explicitly asks to speak with Victoria personally or requests her consultation.
-   In ALL other cases (ordinary booking, prices, schedules, general questions), do NOT mention WhatsApp — point to online booking (${BRAND.bookingLink}) or the contact email (${BRAND.contactEmail}) instead.`;
+   In ALL other cases (ordinary booking, prices, schedules, general questions), do NOT mention WhatsApp — point to online booking (${BRAND.bookingLink}) or the contact email (${BRAND.contactEmail}) instead.
+7. You MAY share the manufacturer's usage directions for the shop products listed above (the USAGE text) when clients ask how to use a product — present them as the manufacturer's recommendations ("according to the manufacturer"). Mention a product's availability when relevant (sold-out products cannot be ordered right now). Do NOT invent directions beyond the USAGE text. For personal or medical concerns (skin conditions, reactions, contraindications, pregnancy), still refer the client to Victoria's WhatsApp as in rule 6.`;
 }

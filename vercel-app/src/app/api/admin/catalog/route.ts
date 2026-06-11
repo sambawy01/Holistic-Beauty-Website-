@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
       priceRub: input.priceRub,
       photo: input.photo ?? "",
       alt: input.alt ?? { en: "", ru: "" },
+      ...(input.usage !== undefined ? { usage: input.usage } : {}),
       quantity: input.quantity !== undefined ? input.quantity : null,
       soldOut: input.soldOut ?? false,
       active: input.active ?? true,
