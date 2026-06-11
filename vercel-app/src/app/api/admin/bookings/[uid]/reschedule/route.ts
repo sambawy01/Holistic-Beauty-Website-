@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isValidAdminKey } from "@/lib/admin/auth";
+import {
+  isAuthorizedAdminRequest,
+  unauthorizedResponse,
+} from "@/lib/admin/auth";
 import { rescheduleBooking } from "@/lib/admin/cal";
 
 /**
@@ -10,8 +13,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ uid: string }> }
 ) {
-  if (!isValidAdminKey(request.headers.get("x-admin-key"))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!isAuthorizedAdminRequest(request)) {
+    return unauthorizedResponse();
   }
 
   const { uid } = await params;

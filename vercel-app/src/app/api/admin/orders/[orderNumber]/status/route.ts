@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isValidAdminKey } from "@/lib/admin/auth";
+import {
+  isAuthorizedAdminRequest,
+  unauthorizedResponse,
+} from "@/lib/admin/auth";
 import {
   isValidOrderNumber,
   updateOrderStatus,
@@ -13,8 +16,8 @@ export const runtime = "nodejs";
  * POST /api/admin/orders/<orderNumber>/status — advance an order's status.
  *
  * Body: { status: "shipped" | "delivered" }
- * Auth: x-admin-key header (same pattern as the booking actions — a bad or
- * missing key answers 404 so the endpoint doesn't advertise its existence).
+ * Auth: HTTP Basic (ADMIN_USER/ADMIN_PASS) or the legacy admin key via
+ * x-admin-key / ?key= (same combined check as every /api/admin/* route).
  *
  * Behavior:
  * - Only forward transitions are allowed (ordered→shipped→delivered);
@@ -30,8 +33,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
-  if (!isValidAdminKey(request.headers.get("x-admin-key"))) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!isAuthorizedAdminRequest(request)) {
+    return unauthorizedResponse();
   }
 
   const { orderNumber } = await params;

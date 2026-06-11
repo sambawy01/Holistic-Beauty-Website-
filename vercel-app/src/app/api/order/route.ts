@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
 import { saveOrder, type StoredOrder } from "@/lib/orders";
 import {
-  PRODUCTS_BY_SLUG,
+  getCatalog,
+  effectiveSoldOut,
+  decrementQuantities,
   formatEgp,
   formatRub,
-  type ShopProduct,
-} from "@/lib/shop-products";
+  type Product,
+} from "@/lib/catalog";
 
 export const runtime = "nodejs";
 
@@ -14,8 +16,15 @@ export const runtime = "nodejs";
  * POST /api/order — cash-on-delivery product orders from the static shop.
  *
  * Trust model:
- * - The catalog (names + prices) lives server-side in @/lib/shop-products.
- *   Totals are always computed here; any client-supplied totals are ignored.
+ * - The catalog (names + prices + stock) is the DYNAMIC catalog in
+ *   @/lib/catalog (Vercel Blob, falling back to its built-in seed). Totals
+ *   are always computed here; any client-supplied totals are ignored.
+ * - Sold-out products (manual flag or quantity 0) and quantities exceeding
+ *   tracked stock are rejected with a 400 whose `fields.items` message is
+ *   bilingual (EN / RU) so the static shop can show it verbatim.
+ * - On success, tracked quantities are decremented (read-modify-write;
+ *   races are tolerable at this volume). Hitting 0 makes the product auto
+ *   sold-out for subsequent catalog fetches.
  * - Same CORS allowlist as /api/chat; per-IP in-memory rate limit.
  * - Owner notification via Resend (same pattern as /api/cal/webhook), with a
  *   graceful console-log no-op when RESEND_API_KEY is unset. A mailer failure
@@ -95,7 +104,7 @@ function clientIp(request: NextRequest): string {
 // --- Validation --------------------------------------------------------------
 
 interface OrderLine {
-  product: ShopProduct;
+  product: Product;
   qty: number;
   lineEgp: number;
   lineRub: number;
@@ -114,10 +123,17 @@ interface ValidatedOrder {
 }
 
 function validateOrder(
-  body: unknown
+  body: unknown,
+  catalog: Product[]
 ): { ok: true; order: ValidatedOrder } | { ok: false; fields: Record<string, string> } {
   const fields: Record<string, string> = {};
   const b = (body ?? {}) as Record<string, unknown>;
+
+  // Only active products are orderable — hidden products behave like unknown
+  // slugs, exactly as the public /api/products presents the world.
+  const productsBySlug = new Map(
+    catalog.filter((p) => p.active).map((p) => [p.slug, p])
+  );
 
   // items -------------------------------------------------------------------
   const lines: OrderLine[] = [];
@@ -129,7 +145,7 @@ function validateOrder(
     const seen = new Set<string>();
     for (const [i, raw] of b.items.entries()) {
       const item = (raw ?? {}) as { slug?: unknown; qty?: unknown };
-      if (typeof item.slug !== "string" || !PRODUCTS_BY_SLUG.has(item.slug)) {
+      if (typeof item.slug !== "string" || !productsBySlug.has(item.slug)) {
         fields.items = `items[${i}].slug is not a known product`;
         break;
       }
@@ -146,8 +162,17 @@ function validateOrder(
         fields.items = `items[${i}].qty must be an integer between 1 and ${MAX_QTY}`;
         break;
       }
+      const product = productsBySlug.get(item.slug)!;
+      // Stock checks — bilingual messages the static shop shows verbatim.
+      if (effectiveSoldOut(product)) {
+        fields.items = `“${product.en.name}” is sold out / «${product.ru.name}» нет в наличии`;
+        break;
+      }
+      if (typeof product.quantity === "number" && item.qty > product.quantity) {
+        fields.items = `Only ${product.quantity} left of “${product.en.name}” / Осталось только ${product.quantity}: «${product.ru.name}»`;
+        break;
+      }
       seen.add(item.slug);
-      const product = PRODUCTS_BY_SLUG.get(item.slug)!;
       lines.push({
         product,
         qty: item.qty,
@@ -264,7 +289,7 @@ function buildEmail(
 
   const textItems = order.lines.map(
     (l) =>
-      `- ${l.product.nameEn} / ${l.product.nameRu} × ${l.qty} = ${formatEgp(l.lineEgp)} / ${formatRub(l.lineRub)}`
+      `- ${l.product.en.name} / ${l.product.ru.name} × ${l.qty} = ${formatEgp(l.lineEgp)} / ${formatRub(l.lineRub)}`
   );
   const text = [
     "New shop order (cash on delivery)",
@@ -290,7 +315,7 @@ function buildEmail(
     .map(
       (l) =>
         `<tr>` +
-        `<td style="padding:8px 12px 8px 0;color:#3A332C;font-size:14px;border-bottom:1px solid #E5DCCB;">${escapeHtml(l.product.nameEn)}<br><span style="color:#847866;font-size:13px;">${escapeHtml(l.product.nameRu)}</span></td>` +
+        `<td style="padding:8px 12px 8px 0;color:#3A332C;font-size:14px;border-bottom:1px solid #E5DCCB;">${escapeHtml(l.product.en.name)}<br><span style="color:#847866;font-size:13px;">${escapeHtml(l.product.ru.name)}</span></td>` +
         `<td style="padding:8px 12px;color:#3A332C;font-size:14px;border-bottom:1px solid #E5DCCB;text-align:center;">${l.qty}</td>` +
         `<td style="padding:8px 0;color:#3A332C;font-size:14px;border-bottom:1px solid #E5DCCB;text-align:right;white-space:nowrap;">${escapeHtml(formatEgp(l.lineEgp))}<br><span style="color:#847866;font-size:13px;">${escapeHtml(formatRub(l.lineRub))}</span></td>` +
         `</tr>`
@@ -459,7 +484,7 @@ function buildBuyerEmail(
       };
 
   const productName = (l: OrderLine) =>
-    ru ? l.product.nameRu : l.product.nameEn;
+    ru ? l.product.ru.name : l.product.en.name;
 
   const textItems = order.lines.map(
     (l) =>
@@ -613,7 +638,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const result = validateOrder(body);
+  // Dynamic catalog — names, prices and stock all come from here. A read
+  // failure is a hard error: validating prices/stock against stale guesses
+  // would be worse than asking the buyer to retry.
+  let catalog: Product[];
+  try {
+    catalog = await getCatalog();
+  } catch (error) {
+    console.error("[order] Catalog read failed:", error);
+    return NextResponse.json(
+      { error: "The shop is temporarily unavailable. Please try again shortly." },
+      { status: 503, headers: cors }
+    );
+  }
+
+  const result = validateOrder(body, catalog);
   if (!result.ok) {
     return NextResponse.json(
       { error: "Validation failed", fields: result.fields },
@@ -622,6 +661,17 @@ export async function POST(request: NextRequest) {
   }
 
   const orderNumber = generateOrderNumber();
+
+  // Decrement tracked stock now that the order is accepted. Read-modify-write
+  // with tolerable races at this volume; a failure here must never fail the
+  // order — Victoria reconciles stock from the admin panel if it ever drifts.
+  try {
+    await decrementQuantities(
+      result.order.lines.map((l) => ({ slug: l.product.slug, qty: l.qty }))
+    );
+  } catch (error) {
+    console.error(`[order] Stock decrement failed for ${orderNumber}:`, error);
+  }
 
   // Persist to Vercel Blob FIRST so the admin inbox sees the order even if
   // both mailers fail. A Blob failure must never fail the order either —
@@ -636,7 +686,7 @@ export async function POST(request: NextRequest) {
       items: result.order.lines.map((l) => ({
         slug: l.product.slug,
         qty: l.qty,
-        names: { en: l.product.nameEn, ru: l.product.nameRu },
+        names: { en: l.product.en.name, ru: l.product.ru.name },
         lineTotals: { egp: l.lineEgp, rub: l.lineRub },
       })),
       totals: { egp: result.order.totalEgp, rub: result.order.totalRub },

@@ -1,9 +1,12 @@
 /**
- * Server-side shop catalog — single source of truth for COD orders.
+ * SEED-ONLY shop catalog.
  *
- * The static shop page renders its own copy of this data, but all totals
- * are computed HERE on the server from these prices. Client-supplied
- * prices/totals are never trusted.
+ * Orders are now validated against the DYNAMIC catalog in @/lib/catalog
+ * (Vercel Blob `catalog/products.json`, editable from /admin). This file
+ * remains solely as the seed source: when the catalog blob does not exist
+ * yet, @/lib/catalog builds its SEED from these six products.
+ *
+ * Do NOT import this module from the order path — use @/lib/catalog.
  *
  * Prices are in EGP and RUB (integer units, no cents). Two products carry
  * prices converted from onmacabim-prof.com USD list prices (rates of

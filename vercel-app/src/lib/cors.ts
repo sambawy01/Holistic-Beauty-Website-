@@ -15,11 +15,14 @@ export function isAllowedOrigin(origin: string | null): boolean {
   return ALLOWED_ORIGINS.has(origin) || LOCAL_ORIGIN_RE.test(origin);
 }
 
-export function corsHeaders(origin: string | null): Record<string, string> {
+export function corsHeaders(
+  origin: string | null,
+  methods: string = "POST, OPTIONS"
+): Record<string, string> {
   if (!origin || !isAllowedOrigin(origin)) return {};
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": methods,
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",

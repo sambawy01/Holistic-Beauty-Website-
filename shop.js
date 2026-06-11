@@ -7,18 +7,19 @@
   "use strict";
 
   /* =====================================================================
-     PRODUCT DATA — the single source of truth for the shop.
-     Real Onmacabim retail products carried by the studio (onmacabim-prof.com).
-     Slugs and prices MUST stay identical to
-     vercel-app/src/lib/shop-products.ts — the server recomputes totals
-     from its own copy, so any drift breaks orders.
-     `photo` points at a 900×900 JPEG in assets/img/shop/.
+     EMBEDDED PRODUCT DATA — OFFLINE FALLBACK ONLY.
+     The live catalog is fetched from GET <API_BASE>/api/products (Victoria
+     edits it from her admin panel); this embedded copy renders only when
+     that fetch fails, so the shop never goes blank. It mirrors the SEED
+     catalog in vercel-app/src/lib/catalog.ts.
+     `photo` points at a 900×900 JPEG in assets/img/shop/ (the API may also
+     return absolute blob URLs for uploaded photos).
      `alt` is the per-language image description. If `photo` is null the
      card falls back to the tinted-gradient-and-initial placeholder art.
      `desc` is short marketing copy, rendered in the product detail modal.
      Prices: `egp` in Egyptian pounds, `rub` in roubles.
      ===================================================================== */
-  var PRODUCTS = [
+  var EMBEDDED_PRODUCTS = [
     {
       slug: "tohar-hamidbar-concentrate",
       name: { en: "Tohar Hamidbar No.2 Herbal Concentrate", ru: "Травяной концентрат Tohar Hamidbar №2" },
@@ -118,19 +119,26 @@
   ];
   /* ========================= end PRODUCT DATA ========================= */
 
+  /* The render-time catalog. Starts as the embedded fallback and is
+     replaced by the live API catalog before first render when available. */
+  var PRODUCTS = EMBEDDED_PRODUCTS;
+
   var LANG = (document.documentElement.lang || "en").toLowerCase().indexOf("ru") === 0 ? "ru" : "en";
   var STORAGE_KEY = "vv-cart";
   var PHONE_RE = /^\+?[0-9\s\-()]{8,17}$/;
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   var IS_LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  var API_URL = IS_LOCAL
-    ? "http://localhost:3000/api/order"
-    : "https://book.victoriaholisticbeauty.com/api/order";
+  var API_BASE = IS_LOCAL
+    ? "http://localhost:3000"
+    : "https://book.victoriaholisticbeauty.com";
+  var API_URL = API_BASE + "/api/order";
+  var PRODUCTS_URL = API_BASE + "/api/products";
   var MAIL_TO = "victoria@victoriaholisticbeauty.com";
 
   var T = {
     en: {
       add: "Add to order",
+      soldOut: "Sold out",
       view: "View details",
       decrease: "Decrease quantity",
       increase: "Increase quantity",
@@ -177,6 +185,7 @@
     },
     ru: {
       add: "Добавить в заказ",
+      soldOut: "Нет в наличии",
       view: "Подробнее",
       decrease: "Уменьшить количество",
       increase: "Увеличить количество",
@@ -228,6 +237,47 @@
     for (var i = 0; i < PRODUCTS.length; i++) if (PRODUCTS[i].slug === slug) return PRODUCTS[i];
     return null;
   }
+  function embeddedBySlug(slug) {
+    for (var i = 0; i < EMBEDDED_PRODUCTS.length; i++) if (EMBEDDED_PRODUCTS[i].slug === slug) return EMBEDDED_PRODUCTS[i];
+    return null;
+  }
+  function langPair(obj) {
+    obj = obj || {};
+    return { en: typeof obj.en === "string" ? obj.en : "", ru: typeof obj.ru === "string" ? obj.ru : "" };
+  }
+  /* Map the public API catalog ({slug, name, sub, desc, priceEgp, priceRub,
+     photo, alt, soldOut}) onto the renderer's product shape. Tints and the
+     placeholder initial are reused from the embedded copy when the slug is
+     known, otherwise derived/defaulted. `photo` may be a site-relative path
+     (assets/img/shop/x.jpg) or an absolute blob URL — <img src> takes both. */
+  function adoptApiProducts(list) {
+    var mapped = [];
+    for (var i = 0; i < list.length; i++) {
+      var ap = list[i] || {};
+      if (typeof ap.slug !== "string" || !ap.slug) continue;
+      if (typeof ap.priceEgp !== "number" || typeof ap.priceRub !== "number") continue;
+      var base = embeddedBySlug(ap.slug);
+      var name = langPair(ap.name);
+      if (!name.en && !name.ru) continue;
+      if (!name.en) name.en = name.ru;
+      if (!name.ru) name.ru = name.en;
+      mapped.push({
+        slug: ap.slug,
+        name: name,
+        sub: langPair(ap.sub),
+        desc: langPair(ap.desc),
+        alt: langPair(ap.alt),
+        egp: ap.priceEgp,
+        rub: ap.priceRub,
+        photo: typeof ap.photo === "string" && ap.photo ? ap.photo : null,
+        soldOut: !!ap.soldOut,
+        initial: base ? base.initial : { en: (name.en.charAt(0) || "·").toUpperCase(), ru: (name.ru.charAt(0) || "·").toUpperCase() },
+        tintA: base ? base.tintA : "#E0D8CE",
+        tintB: base ? base.tintB : "#BFB1A2"
+      });
+    }
+    return mapped;
+  }
   function fmtEgp(n) { return "E£" + n.toLocaleString("en-US"); }
   function fmtRub(n) { return n.toLocaleString("ru-RU").replace(/ |\s/g, " ") + " ₽"; }
   function itemsWord(n) {
@@ -245,7 +295,10 @@
     try {
       var raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
       for (var slug in raw) {
-        if (bySlug(slug) && typeof raw[slug] === "number") {
+        var product = bySlug(slug);
+        /* Unknown (removed) and sold-out products are silently dropped —
+           the cart only ever holds currently orderable items. */
+        if (product && !product.soldOut && typeof raw[slug] === "number") {
           var q = Math.floor(raw[slug]);
           if (q >= 1) cart[slug] = Math.min(q, 99);
         }
@@ -262,6 +315,8 @@
     return { egp: egp, rub: rub };
   }
   function setQty(slug, qty) {
+    var product = bySlug(slug);
+    if (!product || product.soldOut) return; /* sold-out: never enters the cart */
     if (qty <= 0) delete cart[slug]; else cart[slug] = Math.min(qty, 99);
     saveCart();
     renderAction(slug);
@@ -289,6 +344,21 @@
   function fillAction(holder, slug) {
     var p = bySlug(slug);
     holder.textContent = "";
+    if (p.soldOut) {
+      /* Sold out: the Add button becomes a disabled state (price stays
+         visible on the card/modal as usual). */
+      var so = document.createElement("button");
+      so.type = "button";
+      so.className = "shop-add shop-add-soldout";
+      so.disabled = true;
+      so.setAttribute("aria-disabled", "true");
+      so.textContent = T.soldOut;
+      so.setAttribute("aria-label", T.soldOut + " — " + p.name[LANG]);
+      so.style.opacity = "0.55";
+      so.style.cursor = "default";
+      holder.appendChild(so);
+      return;
+    }
     if (!cart[slug]) {
       var add = document.createElement("button");
       add.type = "button";
@@ -362,6 +432,25 @@
       ini.setAttribute("aria-hidden", "true");
       ini.textContent = p.initial[LANG];
       art.appendChild(ini);
+    }
+    if (p.soldOut) {
+      /* Tasteful badge over the photo. Styled inline so the static
+         stylesheet needs no changes for this API-driven state. */
+      art.style.position = "relative";
+      var badge = document.createElement("span");
+      badge.className = "shop-soldout-badge";
+      badge.textContent = T.soldOut;
+      badge.style.cssText =
+        "position:absolute;top:12px;left:12px;z-index:2;" +
+        "padding:5px 12px;border-radius:999px;" +
+        "background:rgba(58,51,44,0.82);color:#FDF9F3;" +
+        "font-size:12px;letter-spacing:0.08em;text-transform:uppercase;" +
+        "pointer-events:none;";
+      art.appendChild(badge);
+      if (p.photo) {
+        var im = art.querySelector("img");
+        if (im) { im.style.opacity = "0.55"; im.style.filter = "grayscale(35%)"; }
+      }
     }
     return art;
   }
@@ -693,22 +782,43 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       }).then(function (res) {
+        if (res.status === 400) {
+          /* Validation rejection — e.g. an item sold out after it was added
+             to the cart. Surface the server's (bilingual) message instead of
+             the generic network-failure mailto fallback. */
+          return res.json().then(function (data) {
+            var messages = [];
+            if (data && data.fields) {
+              for (var k in data.fields) {
+                if (typeof data.fields[k] === "string") messages.push(data.fields[k]);
+              }
+            }
+            throw { validation: messages.length ? messages : [(data && data.error) || "Validation failed"] };
+          }, function () { throw new Error("HTTP 400"); });
+        }
         if (!res.ok) throw new Error("HTTP " + res.status);
         /* Body parse failures must not turn a placed order into an error —
            degrade to a success modal without the order number. */
         return res.json().catch(function () { return {}; });
       }).then(function (data) {
         showSuccess(data && typeof data.orderNumber === "string" ? data.orderNumber : "");
-      }).catch(function () {
+      }).catch(function (err) {
         submit.disabled = false;
         submit.textContent = T.submit;
         fail.textContent = "";
-        fail.appendChild(document.createTextNode(T.failLead + " "));
-        var a = document.createElement("a");
-        a.href = mailtoHref();
-        a.textContent = T.failLink;
-        fail.appendChild(a);
-        fail.appendChild(document.createTextNode(" " + T.failTail));
+        if (err && err.validation) {
+          for (var i = 0; i < err.validation.length; i++) {
+            if (i > 0) fail.appendChild(document.createElement("br"));
+            fail.appendChild(document.createTextNode(err.validation[i]));
+          }
+        } else {
+          fail.appendChild(document.createTextNode(T.failLead + " "));
+          var a = document.createElement("a");
+          a.href = mailtoHref();
+          a.textContent = T.failLink;
+          fail.appendChild(a);
+          fail.appendChild(document.createTextNode(" " + T.failTail));
+        }
         fail.hidden = false;
       });
     });
@@ -825,8 +935,32 @@
     else if (!bar.hidden) bar.focus();
   }
 
-  /* ---------- init ---------- */
-  loadCart();
-  renderGrid();
-  renderBar();
+  /* ---------- init ----------
+     The live catalog comes from the booking host (Victoria edits it in her
+     admin panel) so price changes and sold-out flags appear without a site
+     deploy. If the fetch fails — host down, offline, ad-blocker — the page
+     renders the embedded copy above so the shop never goes blank. The cart
+     is loaded AFTER the catalog settles so stale/sold-out slugs get pruned
+     against the catalog actually being rendered. */
+  function init() {
+    loadCart();
+    renderGrid();
+    renderBar();
+  }
+
+  fetch(PRODUCTS_URL)
+    .then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    })
+    .then(function (data) {
+      var mapped = data && adoptApiProducts(data.products || []);
+      if (!mapped || !mapped.length) throw new Error("empty catalog");
+      PRODUCTS = mapped;
+      init();
+    })
+    .catch(function (err) {
+      console.info("Shop: live catalog unavailable, rendering embedded fallback.", err);
+      init();
+    });
 })();
