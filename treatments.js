@@ -165,7 +165,7 @@
   const lang = (document.documentElement.lang || "en").toLowerCase().indexOf("ru") === 0 ? "ru" : "en";
   const T = lang === "ru"
     ? { book: "Записаться", ask: "или спросите Василия", close: "Закрыть" }
-    : { book: "Book Now", ask: "or ask Vasili", close: "Close" };
+    : { book: "Book Now", ask: "or ask Vassili", close: "Close" };
 
   let overlay = null;
   let dialog = null;
@@ -197,7 +197,7 @@
     overlay.querySelector(".tmodal-wa").textContent = T.ask;
     overlay.querySelector(".tmodal-book").textContent = T.book;
 
-    // "or ask Vasili": close the modal first; chat.js's delegated
+    // "or ask Vassili": close the modal first; chat.js's delegated
     // [data-open-chat] listener then opens the chat card.
     overlay.querySelector(".tmodal-wa").addEventListener("click", close);
 
