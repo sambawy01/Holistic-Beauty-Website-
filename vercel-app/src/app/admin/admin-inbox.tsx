@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { CalBooking } from "@/lib/admin/cal";
-import { SERVICES } from "@/lib/services";
+import { COMBINED_SESSION, SERVICES } from "@/lib/services";
 
 const PUBLIC_BOOKING_BASE = "https://book.victoriaholisticbeauty.com/book";
 const CAIRO_TZ = "Africa/Cairo";
@@ -67,13 +67,23 @@ function serviceForBooking(booking: CalBooking) {
 
 function bookingLink(booking: CalBooking): string {
   const slug = serviceForBooking(booking)?.slug ?? booking.eventType?.slug;
-  return slug
+  // Combined sessions have no public per-service page — link to the picker.
+  return slug && slug !== COMBINED_SESSION.slug
     ? `${PUBLIC_BOOKING_BASE}?service=${slug}`
     : PUBLIC_BOOKING_BASE;
 }
 
 function serviceTitle(booking: CalBooking): string {
   return serviceForBooking(booking)?.en.title ?? booking.title;
+}
+
+/** Client notes (incl. the "Treatments: …" line for combined sessions). */
+function bookingNotes(booking: CalBooking): string | null {
+  const notes = booking.bookingFieldsResponses?.notes;
+  if (typeof notes !== "string") return null;
+  const trimmed = notes.trim();
+  if (!trimmed || trimmed === "No additional notes provided") return null;
+  return trimmed;
 }
 
 function suggestTemplate(booking: CalBooking): string {
@@ -201,6 +211,11 @@ function PendingCard({
           <p className="mt-1 text-sm font-medium text-[#8A5238]">
             {formatCairo(booking.start)} · {booking.duration} min
           </p>
+          {bookingNotes(booking) && (
+            <p className="mt-2 whitespace-pre-line rounded-xl bg-[#3A332C]/5 px-3 py-2 text-sm text-[#3A332C]">
+              {bookingNotes(booking)}
+            </p>
+          )}
         </div>
         <StatusChip status={booking.status} />
       </div>
@@ -360,6 +375,11 @@ function ConfirmedCard({ booking }: { booking: CalBooking }) {
           <p className="mt-1 text-sm text-[#847866]">
             {formatCairo(booking.start)} · {booking.duration} min
           </p>
+          {bookingNotes(booking) && (
+            <p className="mt-2 whitespace-pre-line rounded-xl bg-[#3A332C]/5 px-3 py-2 text-sm text-[#3A332C]">
+              {bookingNotes(booking)}
+            </p>
+          )}
         </div>
         <StatusChip status={booking.status} />
       </div>

@@ -56,6 +56,8 @@ interface BookingDetails {
   attendeeName: string;
   attendeeEmail: string;
   attendeePhone: string;
+  /** Client notes incl. the "Treatments: …" line for combined sessions. */
+  notes: string;
 }
 
 function verifySignature(
@@ -95,11 +97,13 @@ async function fetchBookingFromCal(
         start?: string;
         eventType?: { slug?: string };
         attendees?: WebhookAttendee[];
+        bookingFieldsResponses?: Record<string, unknown>;
       };
     };
     const b = json.data;
     if (!b?.uid) return null;
     const attendee = b.attendees?.[0] ?? {};
+    const rawNotes = b.bookingFieldsResponses?.notes;
     return {
       uid: b.uid,
       service: b.title || b.eventType?.slug || "Booking",
@@ -108,6 +112,7 @@ async function fetchBookingFromCal(
       attendeeName: attendee.name || "Unknown",
       attendeeEmail: attendee.email || "unknown",
       attendeePhone: attendee.phoneNumber || "not provided",
+      notes: typeof rawNotes === "string" ? rawNotes : "",
     };
   } catch (error) {
     console.error("[cal-webhook] Cal API lookup failed:", error);
@@ -118,6 +123,7 @@ async function fetchBookingFromCal(
 function detailsFromPayload(payload: WebhookPayload): BookingDetails {
   const attendee = payload.attendees?.[0] ?? {};
   const responsePhone = payload.responses?.attendeePhoneNumber?.value;
+  const responseNotes = payload.responses?.notes?.value;
   return {
     uid: payload.uid || "",
     service: payload.eventTitle || payload.title || payload.type || "Booking",
@@ -129,6 +135,7 @@ function detailsFromPayload(payload: WebhookPayload): BookingDetails {
       attendee.phoneNumber ||
       (typeof responsePhone === "string" ? responsePhone : "") ||
       "not provided",
+    notes: typeof responseNotes === "string" ? responseNotes : "",
   };
 }
 
@@ -168,6 +175,9 @@ function buildEmail(details: BookingDetails): {
     : ADMIN_URL_BASE;
   const subject = `New booking request — ${details.service} · ${cairoTime}`;
 
+  const showNotes =
+    details.notes && details.notes !== "No additional notes provided";
+
   const text = [
     "New booking request",
     "",
@@ -176,6 +186,7 @@ function buildEmail(details: BookingDetails): {
     `Name:     ${details.attendeeName}`,
     `Email:    ${details.attendeeEmail}`,
     `Phone:    ${details.attendeePhone}`,
+    ...(showNotes ? [`Notes:    ${details.notes}`] : []),
     "",
     "Confirm, decline with a note, or suggest another time here:",
     reviewLink,
@@ -197,6 +208,7 @@ function buildEmail(details: BookingDetails): {
         ${row("Name", details.attendeeName)}
         ${row("Email", details.attendeeEmail)}
         ${row("Phone", details.attendeePhone)}
+        ${showNotes ? row("Notes", details.notes) : ""}
       </table>
       <p style="margin:28px 0 16px;color:#3A332C;font-size:15px;">Confirm, decline with a note, or suggest another time here:</p>
       <a href="${reviewLink}" style="display:inline-block;background-color:#3A332C;color:#FFFDF9;text-decoration:none;padding:12px 28px;border-radius:9999px;font-size:15px;">Open booking inbox</a>

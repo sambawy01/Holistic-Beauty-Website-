@@ -14,7 +14,6 @@ interface BookingRequestV2 {
   eventTypeId: number;
   lengthInMinutes?: number;
   metadata?: Record<string, string | number | boolean>;
-  guests?: string[];
   bookingFieldsResponses?: Record<string, string | string[]>;
 }
 
@@ -112,8 +111,6 @@ export async function POST(request: NextRequest) {
         notes,
         "discovery-method": bookingData.metadata?.referralSource,
       },
-      ...(bookingData.guests &&
-        bookingData.guests.length > 0 && { guests: bookingData.guests }),
     };
 
     const apiUrl = `${process.env.CALCOM_API_URL}/bookings`;

@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import BookingWidget from "@/components/booking-calendar/booking-widget";
-import { SERVICES, getServiceBySlug, type Service } from "@/lib/services";
+import SessionBuilder from "@/components/booking-calendar/session-builder";
+import { SERVICES, getServiceBySlug } from "@/lib/services";
 
 export const metadata = {
   title: "Book — Victoria Vasilyeva Holistic Beauty",
@@ -76,76 +76,6 @@ function ServicePicker({ lang }: { lang: Lang }) {
   );
 }
 
-function ServiceCalendar({
-  service,
-  lang,
-  duration,
-}: {
-  service: Service;
-  lang: Lang;
-  duration: number;
-}) {
-  const multiDuration = service.durations.length > 1;
-  const unit = lang === "ru" ? "мин" : "min";
-
-  return (
-    <div>
-      <div className="mb-8 text-center">
-        <h2 className="font-serif text-2xl text-[#3A332C]">
-          {service[lang].title}
-        </h2>
-        <p className="mt-2 text-sm text-[#847866]">
-          {service.priceLine[lang]} · {durationLabel(service.durations, lang)}
-        </p>
-
-        {multiDuration && (
-          <div className="mt-4 inline-flex gap-2 rounded-full border border-[#3A332C]/10 bg-[#FFFDF9] p-1">
-            {service.durations.map((d) => (
-              <Link
-                key={d}
-                href={withLang(
-                  `/book?service=${service.slug}&duration=${d}`,
-                  lang
-                )}
-                className={
-                  d === duration
-                    ? "rounded-full bg-[#A9745A] px-4 py-1.5 text-sm font-medium text-[#FDF9F3]"
-                    : "rounded-full px-4 py-1.5 text-sm text-[#847866] transition-colors hover:text-[#A9745A]"
-                }
-              >
-                {d} {unit}
-              </Link>
-            ))}
-          </div>
-        )}
-
-        <p className="mt-4 text-sm">
-          <Link
-            href={withLang("/book", lang)}
-            className="text-[#A9745A] underline-offset-4 hover:underline"
-          >
-            {lang === "ru" ? "← Выбрать другую процедуру" : "← Change treatment"}
-          </Link>
-        </p>
-      </div>
-
-      <BookingWidget
-        eventTypeId={String(service.eventTypeId)}
-        eventLength={duration}
-        multiDuration={multiDuration}
-        lang={lang}
-        title={lang === "ru" ? "Выберите удобное время" : "Choose a time that suits you"}
-        description={
-          lang === "ru"
-            ? "Виктория подтвердит вашу запись после отправки заявки."
-            : "Victoria will confirm your appointment after you send the request."
-        }
-        showHeader
-      />
-    </div>
-  );
-}
-
 export default async function BookPage({
   searchParams,
 }: {
@@ -206,7 +136,11 @@ export default async function BookPage({
         {!calcomConfigured ? (
           <MissingConfigNotice lang={lang} />
         ) : service ? (
-          <ServiceCalendar service={service} lang={lang} duration={duration} />
+          <SessionBuilder
+            serviceSlug={service.slug}
+            lang={lang}
+            duration={duration}
+          />
         ) : (
           <ServicePicker lang={lang} />
         )}

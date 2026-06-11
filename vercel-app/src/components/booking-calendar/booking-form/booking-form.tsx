@@ -16,7 +16,6 @@ import { createBookingSchema, BookingFormData, BookingLang } from "./schemas";
 import { MeetingDetails } from "./meeting-details";
 import { ContactSection } from "./contact-section";
 import { ReferralSection } from "./referral-section";
-import { GuestsSection } from "./guests-section";
 import { PolicyAgreementSection } from "./policy-agreement-section";
 import Link from "next/link";
 
@@ -27,6 +26,8 @@ interface BookingFormProps {
   userTimezone: string; // User's selected timezone
   /** Send the explicit length to Cal.com (multi-duration event types) */
   sendLengthInMinutes?: boolean;
+  /** Multi-treatment sessions: appended to the booking notes for Victoria. */
+  treatmentsNote?: string;
   lang?: BookingLang;
   onSuccess: (booking: CalcomBookingResponse) => void;
   onBack: () => void;
@@ -58,12 +59,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
   eventLength,
   userTimezone,
   sendLengthInMinutes,
+  treatmentsNote,
   lang = "en",
   onSuccess,
   onBack,
 }) => {
   const [loading, setLoading] = useState(false);
-  const [guests, setGuests] = useState<string[]>([]);
 
   const ft = FORM_STRINGS[lang] ?? FORM_STRINGS.en;
   const form = useForm<BookingFormData>({
@@ -73,7 +74,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       email: "",
       phone: "",
       notes: "",
-      guests: [],
       referralSource: undefined,
       agreedToPolicy: false,
     },
@@ -88,6 +88,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
       // Normalize phone: strip spaces, dashes and parentheses (keep leading +)
       const normalizedPhone = data.phone.replace(/[\s\-()]/g, "");
 
+      // Multi-treatment sessions: the treatments line must reach Victoria, so
+      // it is appended to whatever the client wrote in the notes field.
+      const notes = [data.notes?.trim(), treatmentsNote]
+        .filter(Boolean)
+        .join("\n\n");
+
       const bookingData: CalcomBookingRequest = {
         eventTypeId,
         start: selectedSlot,
@@ -101,13 +107,12 @@ export const BookingForm: React.FC<BookingFormProps> = ({
         },
         metadata: {
           ...(data.referralSource && { referralSource: data.referralSource }),
-          ...(data.notes && { notes: data.notes }),
+          ...(notes && { notes }),
         },
         bookingFieldsResponses: {
           ...(data.referralSource && { referral_source: data.referralSource }),
-          ...(data.notes && { notes: data.notes }),
+          ...(notes && { notes }),
         },
-        guests: guests.length > 0 ? guests : undefined,
       };
 
       const response = await fetch("/api/booking-calendar/book", {
@@ -158,9 +163,6 @@ export const BookingForm: React.FC<BookingFormProps> = ({
 
           {/* Referral Source */}
           <ReferralSection watch={form.watch} setValue={form.setValue} />
-
-          {/* Guests */}
-          <GuestsSection guests={guests} onGuestsChange={setGuests} />
 
           {/* Reservation Policy Agreement */}
           <PolicyAgreementSection control={form.control} lang={lang} />

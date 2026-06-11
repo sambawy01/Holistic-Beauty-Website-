@@ -21,9 +21,6 @@ export const createBookingSchema = (lang: BookingLang = 'en') =>
           : 'Enter a valid phone number with country code'
       ),
     notes: z.string().optional().or(z.literal('')),
-    guests: z
-      .array(z.string().email('Please enter valid email addresses'))
-      .optional(),
     referralSource: z
       .enum(['google', 'twitter', 'instagram', 'facebook'])
       .optional(),

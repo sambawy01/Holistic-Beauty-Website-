@@ -25,6 +25,8 @@ interface BookingWidgetProps {
   showHeader?: boolean;
   /** Event type supports multiple durations — send the explicit duration to Cal.com */
   multiDuration?: boolean;
+  /** Multi-treatment sessions: appended to the booking notes for Victoria. */
+  treatmentsNote?: string;
   lang?: 'en' | 'ru';
 }
 
@@ -35,6 +37,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
   description,
   showHeader = false,
   multiDuration = false,
+  treatmentsNote,
   lang = 'en',
 }) => {
   const [currentStep, setCurrentStep] = useState<BookingStep>('calendar');
@@ -254,6 +257,7 @@ const BookingWidget: React.FC<BookingWidgetProps> = ({
           eventLength={eventLength}
           userTimezone={userTimezone}
           sendLengthInMinutes={multiDuration}
+          treatmentsNote={treatmentsNote}
           lang={lang}
           onSuccess={handleBookingSuccess}
           onBack={handleBackToCalendar}

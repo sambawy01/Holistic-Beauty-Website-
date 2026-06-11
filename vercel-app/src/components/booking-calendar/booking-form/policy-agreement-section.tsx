@@ -15,18 +15,16 @@ const COPY = {
     heading: 'Reservation policy — please read before booking',
     label: 'I have read and agree to the reservation policy',
     rules: [
-      'Confirmed sessions are payable in full even in case of lateness or no-show, unless rescheduled or cancelled in advance.',
+      'Confirmed sessions are payable in full even in case of lateness or no-show, unless rescheduled or cancelled at least 24 hours prior to the session.',
       'Your session ends at the booked time regardless of arrival time.',
-      'Rescheduling or cancellation is free up to 24 hours before the session; later changes are charged in full.',
     ],
   },
   ru: {
     heading: 'Правила записи — пожалуйста, прочитайте перед бронированием',
     label: 'Я ознакомилась и согласна с правилами записи',
     rules: [
-      'Подтверждённая сессия оплачивается полностью даже при опоздании или неявке, если запись не была перенесена или отменена заранее.',
+      'Подтверждённая сессия оплачивается полностью даже при опоздании или неявке, если запись не была перенесена или отменена не позднее чем за 24 часа до сессии.',
       'Сессия заканчивается в забронированное время независимо от времени начала.',
-      'Перенос или отмена возможны не позднее чем за 24 часа до сессии; более поздние изменения оплачиваются полностью.',
     ],
   },
 } as const;

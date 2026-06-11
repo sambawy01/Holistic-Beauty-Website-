@@ -8,7 +8,6 @@ export interface BookingFormData {
   email: string;
   phone: string;
   notes: string;
-  guests?: string[];
   referralSource?: 'google' | 'twitter' | 'instagram' | 'facebook';
 }
 
@@ -39,7 +38,6 @@ export interface CalcomBookingRequest {
   bookingFieldsResponses?: {
     [key: string]: string;
   };
-  guests?: string[];
 }
 
 export interface CalcomBookingResponse {
