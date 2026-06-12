@@ -45,6 +45,7 @@ jobs:
             cron-cal-sync-check.yml
             cron-evening-digest.yml
             cron-weekly-report.yml
+            cron-monthly-pnl.yml
         run: |
           set -euo pipefail
           for wf in ${FLEET}; do
