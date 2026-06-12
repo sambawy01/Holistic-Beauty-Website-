@@ -638,6 +638,21 @@ export default function FinanceSection({
               Heads up: couldn&apos;t load {pnl.failures.join(", ")} — some numbers may be incomplete.
             </div>
           )}
+          {pnl.revenue.unmatchedBookings > 0 && (
+            <div className="rounded-xl border border-[#E5DCCB] bg-[#F4EFE7] px-4 py-2 text-sm text-[#847866]">
+              {pnl.revenue.unmatchedBookings} confirmed booking
+              {pnl.revenue.unmatchedBookings === 1 ? "" : "s"} had no matching
+              catalogue price and {pnl.revenue.unmatchedBookings === 1 ? "was" : "were"}{" "}
+              excluded from treatment revenue. Link the service to a treatment so it
+              counts.
+            </div>
+          )}
+          {month === currentCairoMonth() && (
+            <div className="rounded-xl border border-[#E5DCCB] bg-[#F4EFE7] px-4 py-2 text-sm text-[#847866]">
+              Month-to-date: confirmed bookings still upcoming this month are counted
+              as earned revenue (confirmed = earned).
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {!adding && !editing && (
               <button type="button" onClick={() => setAdding(true)} className={primaryBtn}>
