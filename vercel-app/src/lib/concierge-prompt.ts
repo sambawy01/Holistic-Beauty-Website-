@@ -4,100 +4,17 @@ import {
   formatRub,
   type Product,
 } from "@/lib/catalog";
+import { SEED as TREATMENTS_SEED, type Treatment } from "@/lib/treatments";
 
 /**
  * Single source of truth for the AI concierge knowledge base and system prompt.
  * Victoria Vasilyeva Holistic Beauty — services, prices, durations, brand facts.
  *
- * Shop products are injected DYNAMICALLY: /api/chat loads the live catalog
- * (falling back to the built-in SEED on a blob failure) and passes it to
- * `buildSystemPrompt`, so Vassili always knows current prices, availability
- * and the manufacturer's usage directions.
+ * Shop products AND treatments are injected DYNAMICALLY: /api/chat loads the
+ * live catalogs (falling back to their built-in SEEDs on a blob failure) and
+ * passes them to `buildSystemPrompt`, so Vassili always knows current prices,
+ * durations, availability and the manufacturer's usage directions.
  */
-
-export interface ServicePrice {
-  /** Variant label, e.g. "60m" or "Full Face+Neck" (empty when there is one flat price). */
-  variantEn: string;
-  variantRu: string;
-  priceEgp: string;
-  priceRub: string;
-}
-
-export interface Service {
-  nameEn: string;
-  nameRu: string;
-  prices: ServicePrice[];
-}
-
-export const SERVICES: Service[] = [
-  {
-    nameEn: "Facial Massage (Plastic / Myofascial / Buccal)",
-    nameRu: "Массаж лица (пластический/миофасциальный/буккальный)",
-    prices: [
-      { variantEn: "60 min", variantRu: "60 мин", priceEgp: "E£2,300", priceRub: "3 100₽" },
-      { variantEn: "90 min", variantRu: "90 мин", priceEgp: "E£3,350", priceRub: "4 700₽" },
-    ],
-  },
-  {
-    nameEn: "Medical Body Massage",
-    nameRu: "Медицинский массаж тела",
-    prices: [
-      { variantEn: "40 min", variantRu: "40 мин", priceEgp: "E£2,500", priceRub: "3 500₽" },
-      { variantEn: "60 min", variantRu: "60 мин", priceEgp: "E£3,350", priceRub: "4 700₽" },
-    ],
-  },
-  {
-    nameEn: "Microcurrent / RF Therapy",
-    nameRu: "Микротоки / RF-терапия",
-    prices: [
-      { variantEn: "20 min", variantRu: "20 мин", priceEgp: "E£1,100", priceRub: "1 600₽" },
-    ],
-  },
-  {
-    nameEn: "HydroFacial + Ultrasonic Cleaning (Onmacabim)",
-    nameRu: "HydroFacial + ультразвуковая чистка",
-    prices: [
-      { variantEn: "60–90 min", variantRu: "60–90 мин", priceEgp: "E£3,700", priceRub: "5 200₽" },
-    ],
-  },
-  {
-    nameEn: "Clear Skin with HOLY LAND (Fruit Peel & Hydro Mask)",
-    nameRu: "Чистая кожа с HOLY LAND",
-    prices: [
-      { variantEn: "", variantRu: "", priceEgp: "E£1,800", priceRub: "2 500₽" },
-    ],
-  },
-  {
-    nameEn: "Non-Invasive Carboxytherapy",
-    nameRu: "Неинвазивная карбокситерапия",
-    prices: [
-      { variantEn: "30 min", variantRu: "30 мин", priceEgp: "E£1,300", priceRub: "1 800₽" },
-    ],
-  },
-  {
-    nameEn: "Mandelic Onmacabim Peel (All-Season Lifting)",
-    nameRu: "Миндальный пилинг Onmacabim",
-    prices: [
-      { variantEn: "20 min", variantRu: "20 мин", priceEgp: "E£1,700", priceRub: "2 300₽" },
-    ],
-  },
-  {
-    nameEn: "Alginate Mask",
-    nameRu: "Альгинатная маска",
-    prices: [
-      { variantEn: "", variantRu: "", priceEgp: "E£1,100", priceRub: "1 600₽" },
-    ],
-  },
-  {
-    nameEn: "Derma Pen Microneedling",
-    nameRu: "Дермапен·микронидлинг",
-    prices: [
-      { variantEn: "Full Face+Neck+Décolletage", variantRu: "Лицо+шея+декольте", priceEgp: "E£4,550", priceRub: "6 400₽" },
-      { variantEn: "Full Face+Neck", variantRu: "Лицо+шея", priceEgp: "E£3,350", priceRub: "4 700₽" },
-      { variantEn: "Single Area", variantRu: "Одна зона", priceEgp: "E£2,500", priceRub: "3 500₽" },
-    ],
-  },
-];
 
 export const BRAND = {
   name: "Victoria Vasilyeva Holistic Beauty",
@@ -113,14 +30,13 @@ export const BRAND = {
   contactEmail: "victoria@victoriaholisticbeauty.com",
 };
 
-function formatService(s: Service): string {
-  const prices = s.prices
-    .map((p) => {
-      const variant = p.variantEn ? `${p.variantEn} / ${p.variantRu}: ` : "";
-      return `${variant}${p.priceEgp} / ${p.priceRub}`;
-    })
-    .join("; ");
-  return `- ${s.nameEn} / ${s.nameRu} — ${prices}`;
+/** One prompt line per treatment: EN/RU names, optional sub-line, duration, prices. */
+function formatTreatment(t: Treatment): string {
+  const desc =
+    t.description.en || t.description.ru
+      ? ` (${[t.description.en, t.description.ru].filter(Boolean).join(" / ")})`
+      : "";
+  return `- ${t.name.en} / ${t.name.ru}${desc} — ${t.durationMinutes} min — ${formatEgp(t.priceEgp)} / ${formatRub(t.priceRub)}`;
 }
 
 /** One prompt line per shop product: names, price, availability, copy, usage. */
@@ -143,12 +59,14 @@ function formatShopProduct(p: Product): string {
 /**
  * Build the domain-restricted system prompt for the concierge.
  * `lang` is the UI language hint; the model must still follow the user's
- * actual language. `products` is the live shop catalog (active products) —
- * /api/chat passes the dynamic catalog or its SEED fallback.
+ * actual language. `products` is the live shop catalog (active products) and
+ * `treatments` the live treatments catalog — /api/chat passes the dynamic
+ * catalogs or their SEED fallbacks.
  */
 export function buildSystemPrompt(
   lang: "en" | "ru",
-  products: readonly Product[] = []
+  products: readonly Product[] = [],
+  treatments: readonly Treatment[] = TREATMENTS_SEED
 ): string {
   const shopSection =
     products.length > 0
@@ -164,7 +82,7 @@ ABOUT THE STUDIO:
 ${BRAND.facts}
 
 SERVICES (EN / RU — Egyptian Pounds / Russian Rubles, with durations):
-${SERVICES.map(formatService).join("\n")}${shopSection}
+${treatments.map(formatTreatment).join("\n")}${shopSection}
 
 BOOKING & CONTACT:
 Clients book treatments directly online at ${BRAND.bookingLink} (no intermediary needed).

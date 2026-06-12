@@ -1,7 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import SessionBuilder from "@/components/booking-calendar/session-builder";
-import { SERVICES, getServiceBySlug } from "@/lib/services";
+import { SERVICES, type Service } from "@/lib/services";
+import {
+  getTreatmentsCatalog,
+  SEED as TREATMENTS_SEED,
+  type Treatment,
+} from "@/lib/treatments";
 
 export const metadata = {
   title: "Book — Victoria Vasilyeva Holistic Beauty",
@@ -23,6 +28,67 @@ function durationLabel(durations: number[], lang: Lang) {
   return `${durations.join(" / ")} ${unit}`;
 }
 
+/* ---------- live service list (treatments catalog → Service shape) ---------- */
+
+/** "E£3,700 · 5 200 ₽" — the single-price line style of the static SERVICES. */
+function priceLine(egp: number, rub: number): string {
+  const egpText = `E£${egp.toLocaleString("en-US")}`;
+  const rubText = `${String(rub).replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ₽`;
+  return `${egpText} · ${rubText}`;
+}
+
+/**
+ * Map a catalog treatment onto the Service shape the booking flow uses.
+ * While a treatment still matches its static SERVICES entry (the seed state),
+ * the static entry is returned as-is — preserving multi-duration toggles and
+ * range price lines for the services that have them. Once Victoria edits a
+ * treatment, it becomes a single-duration service with her values.
+ */
+function treatmentToService(t: Treatment): Service {
+  const staticService = SERVICES.find((s) => s.slug === t.slug);
+  if (
+    staticService &&
+    staticService.eventTypeId === t.eventTypeId &&
+    Math.max(...staticService.durations) === t.durationMinutes &&
+    staticService.price.egp === t.priceEgp &&
+    staticService.price.rub === t.priceRub &&
+    staticService.en.title === t.name.en &&
+    staticService.ru.title === t.name.ru
+  ) {
+    return staticService;
+  }
+  const line = priceLine(t.priceEgp, t.priceRub);
+  return {
+    slug: t.slug,
+    eventTypeId: t.eventTypeId,
+    en: { title: t.name.en },
+    ru: { title: t.name.ru },
+    durations: [t.durationMinutes],
+    priceLine: { en: line, ru: line },
+    price: { egp: t.priceEgp, rub: t.priceRub },
+  };
+}
+
+/**
+ * Live services from the treatments catalog; the static SERVICES list is the
+ * hardcoded fallback (= SEED) so this page never breaks if Blob is down.
+ * Treatments without a linked Cal event type can't take bookings and are
+ * filtered out.
+ */
+async function loadServices(): Promise<Service[]> {
+  let treatments: Treatment[];
+  try {
+    treatments = await getTreatmentsCatalog();
+  } catch (error) {
+    console.error("[book] Treatments read failed — using built-in seed:", error);
+    treatments = [...TREATMENTS_SEED];
+  }
+  const services = treatments
+    .filter((t) => t.active && t.eventTypeId > 0)
+    .map(treatmentToService);
+  return services.length > 0 ? services : [...SERVICES];
+}
+
 function MissingConfigNotice({ lang }: { lang: Lang }) {
   const text =
     lang === "ru"
@@ -42,7 +108,7 @@ function MissingConfigNotice({ lang }: { lang: Lang }) {
   );
 }
 
-function ServicePicker({ lang }: { lang: Lang }) {
+function ServicePicker({ lang, services }: { lang: Lang; services: Service[] }) {
   return (
     <div className="mx-auto max-w-2xl">
       <p className="mb-8 text-center text-[#847866]">
@@ -51,7 +117,7 @@ function ServicePicker({ lang }: { lang: Lang }) {
           : "Choose a treatment to see available times."}
       </p>
       <ul className="flex flex-col gap-3">
-        {SERVICES.map((service) => (
+        {services.map((service) => (
           <li key={service.slug}>
             <Link
               href={withLang(`/book?service=${service.slug}`, lang)}
@@ -88,7 +154,10 @@ export default async function BookPage({
   } = await searchParams;
   const lang: Lang = langParam === "ru" ? "ru" : "en";
 
-  const service = getServiceBySlug(serviceParam);
+  const services = await loadServices();
+  const service = serviceParam
+    ? services.find((s) => s.slug === serviceParam)
+    : undefined;
   const calcomConfigured = Boolean(process.env.CALCOM_API_KEY);
   const mainSite = lang === "ru" ? MAIN_SITE_RU : MAIN_SITE_EN;
 
@@ -140,9 +209,10 @@ export default async function BookPage({
             serviceSlug={service.slug}
             lang={lang}
             duration={duration}
+            services={services}
           />
         ) : (
-          <ServicePicker lang={lang} />
+          <ServicePicker lang={lang} services={services} />
         )}
 
         <p className="mt-12 text-center text-sm text-[#847866]">

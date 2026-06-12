@@ -80,25 +80,31 @@ interface SessionBuilderProps {
   /** Resolved single-service duration from the URL (longest by default). */
   duration: number;
   lang: Lang;
+  /**
+   * The live service list (built from the treatments catalog by /book).
+   * Defaults to the static SERVICES so the builder never breaks standalone.
+   */
+  services?: Service[];
 }
 
 export default function SessionBuilder({
   serviceSlug,
   duration,
   lang,
+  services = SERVICES,
 }: SessionBuilderProps) {
   const t = STRINGS[lang];
   const [extraSlugs, setExtraSlugs] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  const baseService = SERVICES.find((s) => s.slug === serviceSlug);
+  const baseService = services.find((s) => s.slug === serviceSlug);
 
   const extras = useMemo(
     () =>
       extraSlugs
-        .map((slug) => SERVICES.find((s) => s.slug === slug))
+        .map((slug) => services.find((s) => s.slug === slug))
         .filter((s): s is Service => Boolean(s)),
-    [extraSlugs]
+    [extraSlugs, services]
   );
 
   if (!baseService) return null;
@@ -128,7 +134,7 @@ export default function SessionBuilder({
     );
   };
 
-  const candidates = SERVICES.filter((s) => s.slug !== baseService.slug);
+  const candidates = services.filter((s) => s.slug !== baseService.slug);
   const anyBlocked = candidates.some(
     (s) => !extraSlugs.includes(s.slug) && !canAdd(s)
   );

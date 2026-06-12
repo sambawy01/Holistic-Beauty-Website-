@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildSystemPrompt } from "@/lib/concierge-prompt";
 import { getCatalog, SEED, type Product } from "@/lib/catalog";
+import {
+  getTreatmentsCatalog,
+  SEED as TREATMENTS_SEED,
+  type Treatment,
+} from "@/lib/treatments";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
 
 export const runtime = "nodejs";
@@ -122,20 +127,35 @@ export async function POST(request: NextRequest) {
 
   const language: "en" | "ru" = lang === "ru" ? "ru" : "en";
 
-  // Live shop knowledge: prices, availability and the manufacturer's usage
-  // directions come from the dynamic catalog. A blob failure must never
-  // break the concierge — degrade to the built-in SEED catalog (which also
-  // carries usage texts).
+  // Live shop + treatments knowledge: prices, durations, availability and
+  // the manufacturer's usage directions come from the dynamic catalogs.
+  // A blob failure must never break the concierge — degrade to the built-in
+  // SEED catalogs. The two reads are independent.
   let catalog: readonly Product[];
-  try {
-    catalog = await getCatalog();
-  } catch (error) {
-    console.error("[chat] Catalog read failed — using seed:", error);
+  let treatments: readonly Treatment[];
+  const [catalogResult, treatmentsResult] = await Promise.allSettled([
+    getCatalog(),
+    getTreatmentsCatalog(),
+  ]);
+  if (catalogResult.status === "fulfilled") {
+    catalog = catalogResult.value;
+  } else {
+    console.error("[chat] Catalog read failed — using seed:", catalogResult.reason);
     catalog = SEED;
+  }
+  if (treatmentsResult.status === "fulfilled") {
+    treatments = treatmentsResult.value;
+  } else {
+    console.error(
+      "[chat] Treatments read failed — using seed:",
+      treatmentsResult.reason
+    );
+    treatments = TREATMENTS_SEED;
   }
   const systemPrompt = buildSystemPrompt(
     language,
-    catalog.filter((p) => p.active)
+    catalog.filter((p) => p.active),
+    treatments.filter((t) => t.active)
   );
 
   // Ollama Cloud when a key is configured, otherwise local ollama
