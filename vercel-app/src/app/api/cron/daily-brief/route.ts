@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listOwnerBookings, type CalBooking } from "@/lib/admin/cal";
-import { listOrders, type StoredOrder } from "@/lib/orders";
 import {
   buildDailyBriefEmail,
   cairoHourNow,
   sendDailyBriefEmail,
 } from "@/lib/daily-brief-email";
+import { gatherDailyBriefData } from "@/lib/daily-brief-data";
+import { getOwnerChatId } from "@/lib/assistant/state";
+import { sendMessage, telegramConfigured } from "@/lib/telegram";
 
 /**
  * Daily 8am-Cairo brief to Victoria — GET, triggered by Vercel Cron.
@@ -45,28 +46,36 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ skipped: "not 8am Cairo", cairoHour });
   }
 
-  // --- gather data (fail-soft per source) -----------------------------------
-  const failures: string[] = [];
-
-  let bookings: CalBooking[] = [];
-  try {
-    bookings = await listOwnerBookings();
-  } catch (error) {
-    console.error("[daily-brief] Failed to load Cal bookings:", error);
-    failures.push("today's bookings");
-  }
-
-  let orders: StoredOrder[] = [];
-  try {
-    orders = await listOrders();
-  } catch (error) {
-    console.error("[daily-brief] Failed to load shop orders:", error);
-    failures.push("shop orders");
-  }
+  // --- gather data (fail-soft per source, shared with Vassili's daily_brief) --
+  const { bookings, orders, failures } = await gatherDailyBriefData();
 
   // --- build + send -----------------------------------------------------------
   const brief = buildDailyBriefEmail({ bookings, orders, failures });
   const result = await sendDailyBriefEmail(brief);
+
+  // --- Telegram push (best effort, never fatal) --------------------------------
+  // When the bot is configured AND Victoria has bound her chat, the same
+  // brief text lands in Telegram. Any failure here must not affect the email
+  // path that has already completed.
+  let telegram: { sent: boolean; reason?: string } = { sent: false };
+  if (telegramConfigured()) {
+    try {
+      const ownerChatId = await getOwnerChatId();
+      if (ownerChatId !== null) {
+        const sent = await sendMessage(ownerChatId, brief.text);
+        telegram = sent.ok
+          ? { sent: true }
+          : { sent: false, reason: `telegram-${sent.status}` };
+      } else {
+        telegram = { sent: false, reason: "no-owner-bound" };
+      }
+    } catch (error) {
+      console.error("[daily-brief] Telegram push failed:", error);
+      telegram = { sent: false, reason: "telegram-error" };
+    }
+  } else {
+    telegram = { sent: false, reason: "telegram-not-configured" };
+  }
 
   return NextResponse.json({
     ok: true,
@@ -76,5 +85,6 @@ export async function GET(request: NextRequest) {
     counts: brief.counts,
     failures,
     email: result,
+    telegram,
   });
 }
