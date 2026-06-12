@@ -737,6 +737,84 @@ try {
     );
   }
 
+  console.log("\n=== 2d. Pre-binding /start nudge (owner-unbound window only) ===");
+  {
+    const NUDGE_RE = /if you're victoria/i;
+    const NUDGE_FORM_RE = /\/start <your access phrase>/;
+
+    // (b) BOUND state — the real synthetic owner binding from section 2 is
+    // live. A bare /start from a NON-OWNER must still hit the UNCHANGED
+    // generic wall: never the nudge, never any hint that binding exists.
+    telegramCalls.length = 0;
+    await sendText(STRANGER_CHAT, "/start");
+    const boundReply = lastTelegramText();
+    check(
+      "bound + non-owner bare /start → generic wall, NOT the nudge",
+      REFUSAL_RE.test(boundReply) &&
+        !NUDGE_RE.test(boundReply) &&
+        !NUDGE_FORM_RE.test(boundReply),
+      boundReply.slice(0, 160)
+    );
+    check(
+      "bound wall leaks neither the access phrase nor that an owner is bound",
+      !boundReply.includes(ADMIN_PASS) &&
+        !/\bbind|\bowner\b|already connected/i.test(boundReply),
+      boundReply.slice(0, 160)
+    );
+
+    // (a) UNBOUND simulation via the owner-404 seam (owner.json is NEVER
+    // deleted — the SDK maps a true 404 to null = "no owner bound").
+    const ownerBytesBefore = await readBlobText("telegram/owner.json");
+    check(
+      "owner binding present before the unbound simulation",
+      ownerBytesBefore !== null
+    );
+    try {
+      blobOwner404Mock.activate();
+      check(
+        "seam active: getOwnerChatId() reports unbound (owner.json untouched)",
+        (await getOwnerChatId()) === null
+      );
+
+      // Bare /start while unbound → gentle nudge, not the wall.
+      telegramCalls.length = 0;
+      await sendText(STRANGER_CHAT, "/start");
+      const nudge = lastTelegramText();
+      check(
+        "unbound + bare /start → nudge text (not the wall)",
+        NUDGE_RE.test(nudge) &&
+          NUDGE_FORM_RE.test(nudge) &&
+          !REFUSAL_RE.test(nudge),
+        nudge.slice(0, 200)
+      );
+
+      // Wrong-password /start while unbound → the generic wall, NOT the nudge.
+      // A present-but-wrong phrase is a guesser probing: it must learn nothing
+      // (no nudge, no pass leak, no closeness hint, no echo of the guess).
+      telegramCalls.length = 0;
+      await sendText(STRANGER_CHAT, "/start totally-wrong-guess");
+      const wrongReply = lastTelegramText();
+      check(
+        "unbound + wrong-pass /start → generic wall, NOT the nudge",
+        REFUSAL_RE.test(wrongReply) &&
+          !NUDGE_RE.test(wrongReply) &&
+          !NUDGE_FORM_RE.test(wrongReply) &&
+          !wrongReply.includes(ADMIN_PASS) &&
+          !/totally-wrong-guess/.test(wrongReply) &&
+          !/close|correct|almost|right password/i.test(wrongReply),
+        wrongReply.slice(0, 200)
+      );
+    } finally {
+      blobOwner404Mock.deactivate();
+    }
+
+    // (c) The seam-based simulation never wrote to owner.json.
+    check(
+      "owner.json byte-identical after the nudge simulation (seam, never deleted)",
+      (await readBlobText("telegram/owner.json")) === ownerBytesBefore
+    );
+  }
+
   console.log("\n=== 3. \"what's my day?\" (real brief data via real Ollama+Cal+Blob) ===");
   {
     telegramCalls.length = 0;

@@ -32,9 +32,15 @@ import {
  * 2. Owner binding — ONE-TIME: the FIRST chat to send `/start <ADMIN_PASS>`
  *    is bound as the owner (Blob telegram/owner.json). Once bound, /start
  *    can NEVER rebind — not even with the correct password — until
- *    telegram/owner.json is manually deleted from Blob. Every other chat
- *    gets the same generic "private assistant" refusal (never revealing
- *    whether an owner exists), the attempt is appended to
+ *    telegram/owner.json is manually deleted from Blob. Once an owner is
+ *    bound, every other chat gets the same generic "private assistant"
+ *    refusal (never revealing whether an owner exists). The ONLY exception
+ *    is the pre-binding window: while NO owner exists, a BARE `/start` (no
+ *    access-phrase token, and only when ADMIN_PASS is configured) gets a
+ *    gentle nudge toward the access-phrase form (no password or closeness is
+ *    ever revealed). A present-but-wrong phrase still gets the generic wall —
+ *    a guesser learns nothing — and this whole branch is unreachable once bound.
+ *    Either way the attempt is appended to
  *    telegram/audit.jsonl, and the owner receives an intrusion alert
  *    (rate-limited per stranger; see shouldAlertOwner in state.ts).
  * 3. Confirmation gates: mutating tools never run off a chat message — they
@@ -140,6 +146,17 @@ function safeEqual(a: string, b: string): boolean {
 const REFUSAL =
   "Hi! I'm Vassili — Victoria's private assistant, so this chat is members-only. " +
   "For bookings and skincare advice, visit victoriaholisticbeauty.com — I'll happily help you there.";
+
+// Shown ONLY in the pre-binding window (no owner bound yet) for a BARE `/start`
+// with no access-phrase token — a legitimate Victoria who simply doesn't know
+// the `/start <phrase>` form. A present-but-wrong phrase gets the generic
+// REFUSAL instead (a guesser must learn nothing). Safe here because there is no
+// owner to protect: it reveals no password and confirms no closeness. The
+// instant an owner IS bound, this branch is unreachable and every chat gets
+// REFUSAL.
+const UNBOUND_START_NUDGE =
+  "Hi — I'm Vassili, Victoria's assistant. If you're Victoria, start me with your access phrase like this:\n" +
+  "/start <your access phrase>";
 
 const BOUND_GREETING =
   "Bound and ready! 🤝 I'm Vassili, your ops assistant.\n\n" +
@@ -266,10 +283,22 @@ async function handleMessage(
           ? "/start with the CORRECT password (rebind blocked)"
           : "/start with a wrong password"
       );
+      // An owner IS bound: every other chat gets the UNCHANGED generic wall —
+      // never reveal whether an owner exists or that the password was correct.
+      await sendMessage(chatId, REFUSAL);
+    } else if (pass.length === 0 && adminPass.length > 0) {
+      // No owner bound yet AND a BARE `/start` (no access-phrase token) while
+      // binding is actually possible (ADMIN_PASS configured): almost certainly
+      // Victoria not knowing the `/start <phrase>` form, so nudge her toward
+      // it. The nudge never echoes input and never confirms closeness.
+      // Unreachable once bound (the REFUSAL branch above takes over).
+      await sendMessage(chatId, UNBOUND_START_NUDGE);
+    } else {
+      // A present-but-wrong access phrase (a guesser probing), OR a
+      // misconfigured/empty ADMIN_PASS where nothing can bind: fail closed to
+      // the SAME generic wall everyone else gets — reveal nothing, hint nothing.
+      await sendMessage(chatId, REFUSAL);
     }
-    // Generic refusal — never reveal whether an owner exists or that the
-    // password was correct.
-    await sendMessage(chatId, REFUSAL);
     return;
   }
 
