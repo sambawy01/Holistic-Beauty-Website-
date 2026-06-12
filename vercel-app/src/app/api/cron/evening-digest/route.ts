@@ -47,8 +47,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ skipped: "not 20:00 Cairo", cairoHour });
   }
 
-  // Same fail-soft gather as the morning brief — bookings + orders.
-  const { bookings, orders, failures } = await gatherDailyBriefData();
+  // Same fail-soft gather as the morning brief — bookings + orders. The
+  // evening digest doesn't render the re-booking radar, so skip building the
+  // whole CRM directory (saves a Cal + Blob scan we'd only throw away).
+  const { bookings, orders, failures } = await gatherDailyBriefData({
+    includeRebooking: false,
+  });
   const digest = buildEveningDigest({ bookings, orders, failures });
 
   if (digest.empty) {

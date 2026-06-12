@@ -12,6 +12,11 @@ import type { BriefRebookingClient } from "./daily-brief-email";
  * a "couldn't load X" note instead of failing entirely. The CRM re-booking
  * radar is additive — a failure there only drops the "due for a check-in"
  * section, never the rest of the brief.
+ *
+ * The re-booking radar builds the WHOLE CRM directory (an extra Cal + Blob
+ * scan). Callers that don't render it — the evening digest discards
+ * `rebookingDue` — pass `{ includeRebooking: false }` to skip that work
+ * entirely rather than build a directory only to throw it away.
  */
 
 export interface DailyBriefData {
@@ -21,7 +26,15 @@ export interface DailyBriefData {
   failures: string[];
 }
 
-export async function gatherDailyBriefData(): Promise<DailyBriefData> {
+export interface GatherOptions {
+  /** Build the CRM re-booking radar (extra Cal/Blob load). Default true. */
+  includeRebooking?: boolean;
+}
+
+export async function gatherDailyBriefData(
+  options: GatherOptions = {}
+): Promise<DailyBriefData> {
+  const includeRebooking = options.includeRebooking ?? true;
   const failures: string[] = [];
 
   let bookings: CalBooking[] = [];
@@ -41,16 +54,18 @@ export async function gatherDailyBriefData(): Promise<DailyBriefData> {
   }
 
   let rebookingDue: BriefRebookingClient[] = [];
-  try {
-    const due = await rebookingRadar({ weeks: 6 });
-    rebookingDue = due.map((c) => ({
-      displayName: c.displayName,
-      lastTreatment: c.lastTreatment,
-      overdueWeeks: c.overdueWeeks,
-    }));
-  } catch (error) {
-    console.error("[daily-brief] Failed to load re-booking radar:", error);
-    // Additive section — omit it on failure rather than degrade the brief.
+  if (includeRebooking) {
+    try {
+      const due = await rebookingRadar({ weeks: 6 });
+      rebookingDue = due.map((c) => ({
+        displayName: c.displayName,
+        lastTreatment: c.lastTreatment,
+        overdueWeeks: c.overdueWeeks,
+      }));
+    } catch (error) {
+      console.error("[daily-brief] Failed to load re-booking radar:", error);
+      // Additive section — omit it on failure rather than degrade the brief.
+    }
   }
 
   return { bookings, orders, rebookingDue, failures };

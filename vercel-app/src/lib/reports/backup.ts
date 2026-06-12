@@ -5,9 +5,15 @@ import { del, get, list, put } from "@vercel/blob";
  *
  * Exports EVERY business blob into one JSON snapshot:
  * - orders/*                  (one JSON doc per order)
+ * - crm/clients/*             (per-client tag overlays + per-note blobs — PII:
+ *                              private notes, tags, visit-derived ids)
  * - catalog/products.json     (shop catalog)
  * - catalog/treatments.json   (treatments catalog)
  * - telegram/audit.jsonl      (Vassili's append-only action log)
+ *
+ * PII NOTE: the CRM blobs hold private client notes/tags. The snapshot is only
+ * ever written to the private Blob store and emailed to the OWNER address
+ * (NOTIFY_EMAIL) — keep it owner-only; never widen the recipient set.
  *
  * BYTE-RESTORE DISCIPLINE: each file is captured as its RAW TEXT (`text`),
  * not re-parsed/re-serialized JSON — a restore is exactly
@@ -41,7 +47,11 @@ const SINGLE_FILES = [
 ] as const;
 
 const ORDERS_PREFIX = "orders/";
-/** Generous cap — order volume is a handful per day. */
+/** CRM overlays + per-note blobs (private PII). */
+const CRM_PREFIX = "crm/clients/";
+/** Prefixes captured one-blob-per-doc (each may span up to the list limit). */
+const BLOB_PREFIXES = [ORDERS_PREFIX, CRM_PREFIX] as const;
+/** Generous cap — order + CRM volume is small for a single studio. */
 const ORDERS_LIST_LIMIT = 1000;
 
 export interface BackupFile {
@@ -77,14 +87,21 @@ export async function buildBackupSnapshot(
   const files: BackupFile[] = [];
   const missing: string[] = [];
 
-  const { blobs, hasMore } = await list({
-    prefix: ORDERS_PREFIX,
-    limit: ORDERS_LIST_LIMIT,
-  });
-  const pathnames = [
-    ...blobs.map((b) => b.pathname),
-    ...SINGLE_FILES,
-  ];
+  // List each one-blob-per-doc prefix (orders + CRM). A prefix that hit the
+  // page cap with more remaining marks the snapshot INCOMPLETE (truncated).
+  const listed: string[] = [];
+  let truncated = false;
+  for (const prefix of BLOB_PREFIXES) {
+    const { blobs, hasMore } = await list({ prefix, limit: ORDERS_LIST_LIMIT });
+    listed.push(...blobs.map((b) => b.pathname));
+    if (hasMore) {
+      truncated = true;
+      console.error(
+        `[backup] ${prefix} listing truncated at ${ORDERS_LIST_LIMIT} — snapshot is INCOMPLETE`
+      );
+    }
+  }
+  const pathnames = [...listed, ...SINGLE_FILES];
 
   for (const pathname of pathnames) {
     try {
@@ -102,16 +119,10 @@ export async function buildBackupSnapshot(
     }
   }
 
-  if (hasMore) {
-    console.error(
-      `[backup] Orders listing truncated at ${ORDERS_LIST_LIMIT} — snapshot is INCOMPLETE`
-    );
-  }
-
   return {
     version: 1,
     generatedAt: now.toISOString(),
-    truncated: Boolean(hasMore),
+    truncated,
     missing,
     files,
   };
