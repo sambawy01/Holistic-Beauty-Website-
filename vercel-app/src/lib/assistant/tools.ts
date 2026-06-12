@@ -508,6 +508,19 @@ export function validateMutationArgs(
       if (typeof num !== "number" || !Number.isFinite(num)) {
         return { ok: false, error: `parameter "${key}" must be a number` };
       }
+      // Money must be POSITIVE — reject at the gate so the confirm card can
+      // never show an amount that would fail on tap. (log_expense/log_income
+      // executors also re-check; this stops the bad value reaching the card.)
+      if (
+        key === "amountEgp" &&
+        (name === "log_expense" || name === "log_income") &&
+        num <= 0
+      ) {
+        return {
+          ok: false,
+          error: `parameter "amountEgp" must be a positive number of EGP`,
+        };
+      }
       normalized[key] = num;
     } else if (declared.type === "boolean") {
       if (typeof value !== "boolean") {
