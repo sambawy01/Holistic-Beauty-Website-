@@ -139,7 +139,7 @@ h2 {
 .nav-logo { height: 46px; width: auto; display: block; object-fit: contain; object-position: left center; }
 .nav-brand { min-width: 0; }
 .hero-sub { margin-top: 18px; font-size: 12px; font-weight: 500; letter-spacing: 0.5em; text-indent: 0.5em; color: var(--photo-ink); text-shadow: 0 1px 12px rgba(26, 21, 17, 0.6); }
-.hero-line { margin-top: 26px; font-family: var(--serif); font-size: clamp(19px, 2.4vw, 25px); color: var(--photo-ink); text-shadow: 0 1px 12px rgba(26, 21, 17, 0.6); }
+.hero-line { margin-top: 26px; font-family: var(--sans); font-weight: 500; font-size: clamp(12px, 1.4vw, 15px); letter-spacing: 0.32em; text-indent: 0.32em; text-transform: uppercase; color: var(--photo-ink); text-shadow: 0 1px 12px rgba(26, 21, 17, 0.6); }
 .cta {
   display: inline-block; margin-top: 38px; padding: 16px 38px;
   border: 1px solid var(--clay); border-radius: 999px;
@@ -388,7 +388,8 @@ button.cta { background: none; font-family: inherit; line-height: inherit; curso
   position: fixed; right: 24px; bottom: 24px; z-index: 80;
   width: 64px; height: 64px; border-radius: 50%;
   border: none; cursor: pointer;
-  background: radial-gradient(circle at 50% 46%, #C18B62 0%, var(--clay) 32%, var(--clay-deep) 68%, #54311E 100%);
+  background: radial-gradient(circle at 50% 50%, rgba(169,116,90,0) 0%, rgba(169,116,90,0.18) 34%, rgba(138,82,56,0.82) 66%, #54311E 100%);
+  backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
   display: grid; place-items: center;
   box-shadow: 0 10px 30px rgba(58, 51, 44, 0.35), inset 0 1px 0 rgba(255, 253, 249, 0.28);
   transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
@@ -400,7 +401,7 @@ button.cta { background: none; font-family: inherit; line-height: inherit; curso
 .chat-launcher:focus-visible { outline: 2px solid var(--clay-deep); outline-offset: 3px; }
 .chat-launcher svg { display: block; }
 
-.chat-launcher .v-flare { transform-origin: 46px 14.5px; animation: v-twinkle 3.4s ease-in-out infinite; }
+.chat-launcher .v-flare { transform-origin: 48px 11.5px; animation: v-twinkle 3.4s ease-in-out infinite; }
 @keyframes v-twinkle {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(0.78) rotate(8deg); opacity: 0.75; }

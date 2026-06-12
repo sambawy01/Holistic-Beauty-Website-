@@ -72,7 +72,7 @@
   // specular highlight stroke); the flare is a bright gold star on the V's tip.
   const launcher = el("button", "chat-launcher", { type: "button", "aria-label": T.open, "aria-expanded": "false" });
   launcher.innerHTML =
-    '<svg viewBox="0 0 64 64" width="40" height="40" aria-hidden="true" focusable="false">' +
+    '<svg viewBox="0 0 64 64" width="50" height="50" aria-hidden="true" focusable="false">' +
       '<defs>' +
         '<linearGradient id="vvGoldFace" x1="0" y1="0" x2="0" y2="1">' +
           '<stop offset="0" stop-color="#FFF0C8"/>' +
@@ -86,16 +86,16 @@
         '</linearGradient>' +
       '</defs>' +
       // extruded depth layers (deep bronze, offset down-right)
-      '<text x="31" y="50.5" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="46" fill="url(#vvGoldEdge)">V</text>' +
-      '<text x="30" y="49.2" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="46" fill="#6F4F14">V</text>' +
+      '<text x="32" y="53.6" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="56" fill="url(#vvGoldEdge)">V</text>' +
+      '<text x="31" y="52.3" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="56" fill="#6F4F14">V</text>' +
       // gold face
-      '<text x="29" y="48" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="46" fill="url(#vvGoldFace)">V</text>' +
+      '<text x="30" y="51" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="56" fill="url(#vvGoldFace)">V</text>' +
       // specular sheen on the face
-      '<text x="29" y="48" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="46" fill="none" stroke="#FFF8E1" stroke-width="0.6" opacity="0.55">V</text>' +
+      '<text x="30" y="51" text-anchor="middle" font-family="\'Cormorant Garamond\', Georgia, serif" font-style="italic" font-weight="500" font-size="56" fill="none" stroke="#FFF8E1" stroke-width="0.6" opacity="0.55">V</text>' +
       // flare: bright gold star at the V tip + glint dot
-      '<path class="v-flare" d="M46 6.5c1.2 4.7 3.25 6.75 8 8-4.75 1.2-6.8 3.25-8 8-1.2-4.75-3.25-6.8-8-8 4.75-1.2 6.8-3.25 8-8z" fill="#FFE9A8"/>' +
-      '<path d="M46 10.2c0.75 2.9 2 4.15 4.9 4.9-2.9 0.75-4.15 2-4.9 4.9-0.75-2.9-2-4.15-4.9-4.9 2.9-0.75 4.15-2 4.9-4.9z" fill="#FFFDF9" opacity="0.9"/>' +
-      '<circle cx="39" cy="21" r="1.5" fill="#FFE9A8" opacity="0.9"/>' +
+      '<path class="v-flare" d="M48 3.5c1.2 4.7 3.25 6.75 8 8-4.75 1.2-6.8 3.25-8 8-1.2-4.75-3.25-6.8-8-8 4.75-1.2 6.8-3.25 8-8z" fill="#FFE9A8"/>' +
+      '<path d="M48 7.2c0.75 2.9 2 4.15 4.9 4.9-2.9 0.75-4.15 2-4.9 4.9-0.75-2.9-2-4.15-4.9-4.9 2.9-0.75 4.15-2 4.9-4.9z" fill="#FFFDF9" opacity="0.9"/>' +
+      '<circle cx="40" cy="19" r="1.5" fill="#FFE9A8" opacity="0.9"/>' +
     '</svg>';
 
   const card = el("section", "chat-card", { role: "dialog", "aria-label": T.title, hidden: "" });
