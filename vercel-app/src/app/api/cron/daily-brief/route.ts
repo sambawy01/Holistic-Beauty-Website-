@@ -45,10 +45,16 @@ export async function GET(request: NextRequest) {
   }
 
   // --- gather data (fail-soft per source, shared with Vassili's daily_brief) --
-  const { bookings, orders, failures } = await gatherDailyBriefData();
+  const { bookings, orders, rebookingDue, failures } =
+    await gatherDailyBriefData();
 
   // --- build + send -----------------------------------------------------------
-  const brief = buildDailyBriefEmail({ bookings, orders, failures });
+  const brief = buildDailyBriefEmail({
+    bookings,
+    orders,
+    rebookingDue,
+    failures,
+  });
   const result = await sendDailyBriefEmail(brief);
 
   // --- Telegram push (best effort, never fatal) --------------------------------

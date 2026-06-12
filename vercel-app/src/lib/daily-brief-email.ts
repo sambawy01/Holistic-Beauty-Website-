@@ -116,11 +116,27 @@ function bookingNotes(booking: CalBooking): string {
 
 // --- brief assembly -----------------------------------------------------------
 
+/**
+ * A client surfaced by the re-booking radar (CRM) — kept as a minimal local
+ * shape so this email module never imports the CRM (and its Blob SDK).
+ */
+export interface BriefRebookingClient {
+  displayName: string;
+  lastTreatment: string;
+  overdueWeeks: number;
+}
+
 export interface DailyBriefInput {
   /** All bookings from GET /bookings?status=upcoming,unconfirmed. */
   bookings: CalBooking[];
   /** All stored shop orders (any status — filtered here). */
   orders: StoredOrder[];
+  /**
+   * Clients due for a re-booking check-in (CRM radar) — ADDITIVE: when absent
+   * or empty the brief renders exactly as before. Surfaced like pending
+   * requests (a gentle nudge), never noise — only shown when non-empty.
+   */
+  rebookingDue?: BriefRebookingClient[];
   /** Data sources that failed to load — surfaced in the email. */
   failures: string[];
   /** "Now" — injectable for tests. */
@@ -131,7 +147,12 @@ export interface DailyBrief {
   subject: string;
   text: string;
   html: string;
-  counts: { appointments: number; pending: number; orders: number };
+  counts: {
+    appointments: number;
+    pending: number;
+    orders: number;
+    rebooking: number;
+  };
 }
 
 export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
@@ -154,6 +175,13 @@ export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
     (o) => o.status === "ordered" || o.status === "confirmed"
   );
 
+  // Re-booking radar (CRM) — top few, most overdue first. Additive: an empty
+  // list renders nothing and never changes the existing brief.
+  const rebookingDue = (input.rebookingDue ?? [])
+    .slice()
+    .sort((a, b) => b.overdueWeeks - a.overdueWeeks);
+  const topRebooking = rebookingDue.slice(0, 5);
+
   const adminToken = process.env.ADMIN_TOKEN || "";
   const adminLink = adminToken
     ? `${ADMIN_URL_BASE}?key=${encodeURIComponent(adminToken)}`
@@ -167,7 +195,10 @@ export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
       : `Your day — ${subjectDate}: no appointments today`;
 
   const emptyDay =
-    apptCount === 0 && pending.length === 0 && openOrders.length === 0;
+    apptCount === 0 &&
+    pending.length === 0 &&
+    openOrders.length === 0 &&
+    topRebooking.length === 0;
 
   // --- text part -------------------------------------------------------------
   const textLines: string[] = [`Good morning! Your day — ${subjectDate}.`, ""];
@@ -220,6 +251,26 @@ export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
         );
       }
       textLines.push(`  Manage orders here: ${adminLink}`);
+    }
+
+    if (topRebooking.length > 0) {
+      textLines.push(
+        "",
+        `Clients due for a check-in (${rebookingDue.length})`
+      );
+      for (const c of topRebooking) {
+        const last = c.lastTreatment ? `last ${c.lastTreatment}, ` : "";
+        textLines.push(
+          `  ${c.displayName} — ${last}${c.overdueWeeks}+ weeks since last visit, nothing booked`
+        );
+      }
+      if (rebookingDue.length > topRebooking.length) {
+        textLines.push(
+          `  …and ${rebookingDue.length - topRebooking.length} more — see the Clients tab: ${adminLink}`
+        );
+      } else {
+        textLines.push(`  See the Clients tab: ${adminLink}`);
+      }
     }
   }
 
@@ -284,6 +335,21 @@ export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
       }
       contentHtml += adminButton("Open admin");
     }
+
+    if (topRebooking.length > 0) {
+      contentHtml += sectionTitle(
+        `Clients due for a check-in (${rebookingDue.length})`
+      );
+      for (const c of topRebooking) {
+        const last = c.lastTreatment
+          ? `${escapeHtml(c.lastTreatment)}, `
+          : "";
+        contentHtml += line(
+          `<strong>${escapeHtml(c.displayName)}</strong> — ${last}<span style="color:#847866;">${c.overdueWeeks}+ weeks since last visit, nothing booked</span>`
+        );
+      }
+      contentHtml += adminButton("Open clients");
+    }
   }
 
   contentHtml += `<p style="margin:28px 0 0;color:#847866;font-size:14px;">Have a wonderful day!<br>— your booking assistant</p>`;
@@ -302,6 +368,7 @@ export function buildDailyBriefEmail(input: DailyBriefInput): DailyBrief {
       appointments: apptCount,
       pending: pending.length,
       orders: openOrders.length,
+      rebooking: rebookingDue.length,
     },
   };
 }

@@ -1,5 +1,7 @@
 import { listOwnerBookings, type CalBooking } from "./admin/cal";
 import { listOrders, type StoredOrder } from "./orders";
+import { rebookingRadar } from "./crm";
+import type { BriefRebookingClient } from "./daily-brief-email";
 
 /**
  * Shared data gathering for Victoria's daily brief — used by both the
@@ -7,12 +9,15 @@ import { listOrders, type StoredOrder } from "./orders";
  * Telegram tool, so the two views can never drift.
  *
  * Fail-soft per source: if Cal or Blob is down, the brief still renders with
- * a "couldn't load X" note instead of failing entirely.
+ * a "couldn't load X" note instead of failing entirely. The CRM re-booking
+ * radar is additive — a failure there only drops the "due for a check-in"
+ * section, never the rest of the brief.
  */
 
 export interface DailyBriefData {
   bookings: CalBooking[];
   orders: StoredOrder[];
+  rebookingDue: BriefRebookingClient[];
   failures: string[];
 }
 
@@ -35,5 +40,18 @@ export async function gatherDailyBriefData(): Promise<DailyBriefData> {
     failures.push("shop orders");
   }
 
-  return { bookings, orders, failures };
+  let rebookingDue: BriefRebookingClient[] = [];
+  try {
+    const due = await rebookingRadar({ weeks: 6 });
+    rebookingDue = due.map((c) => ({
+      displayName: c.displayName,
+      lastTreatment: c.lastTreatment,
+      overdueWeeks: c.overdueWeeks,
+    }));
+  } catch (error) {
+    console.error("[daily-brief] Failed to load re-booking radar:", error);
+    // Additive section — omit it on failure rather than degrade the brief.
+  }
+
+  return { bookings, orders, rebookingDue, failures };
 }
