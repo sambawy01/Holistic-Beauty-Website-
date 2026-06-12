@@ -99,6 +99,24 @@ function MatchedByPhoneHint() {
   );
 }
 
+/**
+ * Hint shown on an EMAIL profile that ABSORBED a phone-redirected record — a
+ * phone-only record folded in because its phone appeared on this email's
+ * records. The merge rested on a PHONE match (not an email match), so the
+ * "verify this is one person" signal must stay visible even though the profile
+ * is email-keyed (and thus NOT flagged matched-by-phone).
+ */
+function MergedByPhoneHint() {
+  return (
+    <span
+      title="This profile absorbed records matched only by phone number (last 9 digits). Verify this is one person before relying on the merged history."
+      className="inline-flex items-center gap-1 rounded-full bg-[#C08A2D]/12 px-2 py-0.5 text-[11px] font-medium text-[#8A6418]"
+    >
+      merged by phone — verify
+    </span>
+  );
+}
+
 function TagPill({
   tag,
   onRemove,
@@ -294,6 +312,7 @@ function ProfileCard({
             {profile?.displayName ?? "Client"}
           </h3>
           {profile?.matchedByPhone && <MatchedByPhoneHint />}
+          {profile?.reconciledFromPhone && <MergedByPhoneHint />}
         </div>
         <button type="button" onClick={onClose} className={subtleBtn}>
           Close
@@ -860,6 +879,7 @@ export default function ClientsSection({
                         {c.displayName}
                       </span>
                       {c.matchedByPhone && <MatchedByPhoneHint />}
+                      {c.reconciledFromPhone && <MergedByPhoneHint />}
                     </span>
                     <span className="text-sm text-[#847866]">
                       {egp(c.totalSpendEgp)}

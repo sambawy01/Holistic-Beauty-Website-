@@ -77,6 +77,7 @@ const {
   listClientProfiles,
   getClientProfile,
   getClientsOverview,
+  toClientSummary,
   rebookingRadar,
   computeRebookingRadar,
 } = crm;
@@ -711,6 +712,82 @@ console.log("\n=== 15. tags route rejects an oversized array (>200) BEFORE proce
   );
   check("PUT tags with a sane set → 200 (normalized + deduped)", sane.status === 200, `status=${sane.status}`);
   process.env.ADMIN_TOKEN = "";
+}
+
+// ============================================================================
+console.log("\n=== 16. F-1 reconciledFromPhone hint + F-2 phone-overlay de-dup ===");
+{
+  // -------- F-1: a profile that ABSORBED a phone-redirected record carries
+  // reconciledFromPhone=true (the email key hides matchedByPhone, but the
+  // commingling-risk hint must NOT vanish). A normal email profile is false.
+  __setCrmStore(makeMemoryStore());
+  const f1Booking = mkBooking(
+    "Facial Massage between Victoria and Dina",
+    "accepted",
+    daysAgo(20),
+    327658,
+    "dina@example.com",
+    "+20 100 765 4321", // teaches phoneToEmailKey: 100765432 → email:dina
+    "Dina"
+  );
+  // A phone-ONLY order (no email) sharing that phone → folds INTO Dina's email
+  // profile via reconciliation. This is the absorbed phone-redirected record.
+  const f1PhoneOrder = mkOrder("VV-F1F1F1", "delivered", 700, daysAgo(8), "", "0100 765 4321", "Dina phone");
+  const f1Profiles = await listClientProfiles({}, {
+    now: NOW,
+    sources: makeSources([f1Booking], [f1PhoneOrder], []),
+  });
+  check("F-1: email + phone-only (shared phone) → ONE profile", f1Profiles.length === 1, `count=${f1Profiles.length}`);
+  const dina = f1Profiles[0];
+  check("F-1: absorbing profile is email-keyed (matchedByPhone false)", dina?.canonicalKey === "email:dina@example.com" && dina?.matchedByPhone === false);
+  check("F-1: absorbing profile has reconciledFromPhone=true", dina?.reconciledFromPhone === true);
+  check("F-1: it really absorbed the phone-only record (both records present)", dina?.bookingsCount === 1 && dina?.ordersCount === 1);
+  check("F-1: reconciledFromPhone flows into the directory summary", toClientSummary(dina).reconciledFromPhone === true);
+
+  // A NORMAL email profile (its own email on every record, even with a phone)
+  // must be reconciledFromPhone=false — the flag fires ONLY on phone redirects.
+  __setCrmStore(makeMemoryStore());
+  const normalProfiles = await listClientProfiles({}, {
+    now: NOW,
+    sources: makeSources(
+      [mkBooking("Facial Massage between Victoria and Sara", "accepted", daysAgo(15), 327658, "sara@example.com", "0100 222 3333", "Sara")],
+      [mkOrder("VV-NORMAL", "delivered", 400, daysAgo(5), "sara@example.com", "0100 222 3333", "Sara")],
+      []
+    ),
+  });
+  check("F-1: a normal email profile has reconciledFromPhone=false", normalProfiles[0]?.reconciledFromPhone === false);
+  check("F-1: normal profile summary reconciledFromPhone=false", toClientSummary(normalProfiles[0]).reconciledFromPhone === false);
+
+  // -------- F-2: two emails sharing a phone → the shared phone-era overlay
+  // attaches to EXACTLY ONE profile (first-won in phoneToEmailKey), never both.
+  __setCrmStore(makeMemoryStore());
+  const sharedPhone = "+20 100 555 7777"; // last 9 = 005557777
+  const sharedPhoneKey = canonicalKey("", sharedPhone)!; // "phone:005557777"
+  const sharedPhoneId = clientIdFor(sharedPhoneKey);
+  await addNote(sharedPhoneId, "phone-era-overlay-SHARED");
+  // A is listed FIRST → wins the phone in phoneToEmailKey (first-wins).
+  const aBooking = mkBooking("Facial Massage between Victoria and Anna", "accepted", daysAgo(30), 327658, "anna@e.com", sharedPhone, "Anna");
+  const bBooking = mkBooking("Facial Massage between Victoria and Bella", "accepted", daysAgo(25), 327658, "bella@e.com", sharedPhone, "Bella");
+  const overviewF2 = await getClientsOverview({ now: NOW, sources: makeSources([aBooking, bBooking], [], []) });
+  const f2Profiles = overviewF2.profiles;
+  check("F-2: two emails sharing a phone → TWO distinct profiles", f2Profiles.length === 2, `count=${f2Profiles.length}`);
+  const carriers = f2Profiles.filter((p) => p.notes.some((n) => n.text === "phone-era-overlay-SHARED"));
+  check("F-2: shared phone-era overlay attaches to EXACTLY ONE profile (no dup)", carriers.length === 1, `carriers=${carriers.length}`);
+  check("F-2: the winner is the FIRST-won email (anna@e.com), not the loser", carriers[0]?.canonicalKey === "email:anna@e.com", carriers[0]?.canonicalKey);
+  check("F-2: the losing email profile did NOT also get the overlay", f2Profiles.find((p) => p.canonicalKey === "email:bella@e.com")?.notes.length === 0);
+  check("F-2: claimed overlay is consumed, so NOT surfaced as unlinked", !overviewF2.unlinked.some((u) => u.clientId === sharedPhoneId));
+
+  // -------- F-2 (unclaimed): a phone-era overlay whose phone NO email claims
+  // and which has no phone-only profile must surface as unlinked — never the
+  // duplicate, never silently dropped.
+  __setCrmStore(makeMemoryStore());
+  const ghostPhoneKey = canonicalKey("", "+20 100 000 1212")!;
+  const ghostPhoneId = clientIdFor(ghostPhoneKey);
+  await addNote(ghostPhoneId, "unclaimed-phone-overlay");
+  const unrelated = mkBooking("Facial Massage between Victoria and Omar", "accepted", daysAgo(5), 327658, "omar@e.com", "0100 999 8888", "Omar");
+  const overviewF2b = await getClientsOverview({ now: NOW, sources: makeSources([unrelated], [], []) });
+  check("F-2: unclaimed phone overlay is SURFACED as unlinked", overviewF2b.unlinked.some((u) => u.clientId === ghostPhoneId && u.noteCount === 1));
+  check("F-2: unclaimed phone overlay NOT mis-attached to the unrelated profile", overviewF2b.profiles.every((p) => p.notes.every((n) => n.text !== "unclaimed-phone-overlay")));
 }
 
 // ============================================================================

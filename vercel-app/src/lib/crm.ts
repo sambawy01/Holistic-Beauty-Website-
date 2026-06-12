@@ -176,6 +176,17 @@ export interface ClientProfile {
    * family members / strangers sharing a number. Surfaced in the UI as a hint.
    */
   matchedByPhone: boolean;
+  /**
+   * True when this EMAIL-keyed profile ABSORBED at least one phone-redirected
+   * record — a phone-only record folded in because its phone appeared on an
+   * email-bearing record (see phoneToEmailKey reconciliation). The profile key
+   * is `email:…` so `matchedByPhone` is false, yet the commingling risk is
+   * highest here: a PHONE match (not an email match) pulled extra records in.
+   * Surfaced as its own hint so the "verify this is one person" signal does not
+   * vanish exactly when it matters most. NOT gated on name equality (names vary
+   * by spelling / transliteration).
+   */
+  reconciledFromPhone: boolean;
   lang: string;
   firstSeen: string | null;
   /** Most recent PAST confirmed booking start (ISO), or null. */
@@ -200,6 +211,7 @@ export interface ClientSummary {
   email: string;
   phone: string;
   matchedByPhone: boolean;
+  reconciledFromPhone: boolean;
   lang: string;
   lastVisit: string | null;
   nextVisit: string | null;
@@ -217,6 +229,7 @@ export function toClientSummary(p: ClientProfile): ClientSummary {
     email: p.email,
     phone: p.phone,
     matchedByPhone: p.matchedByPhone,
+    reconciledFromPhone: p.reconciledFromPhone,
     lang: p.lang,
     lastVisit: p.lastVisit,
     nextVisit: p.nextVisit,
@@ -744,6 +757,8 @@ interface ClientAccumulator {
   langs: NameCandidate[];
   bookings: ClientBookingRef[];
   orders: ClientOrderRef[];
+  /** Set true once a phone-redirected record folds into this email profile. */
+  reconciledFromPhone: boolean;
 }
 
 function getAcc(
@@ -761,6 +776,7 @@ function getAcc(
       langs: [],
       bookings: [],
       orders: [],
+      reconciledFromPhone: false,
     };
     map.set(key, acc);
   }
@@ -871,6 +887,11 @@ async function buildProfilesWithOverlay(
     const key = resolveKey(email, phone);
     if (!key) continue;
     const acc = getAcc(map, key);
+    // A record carrying NO email of its own that lands under an EMAIL key was
+    // folded in by phone→email reconciliation (F-1): flag the absorbing profile.
+    if (key.startsWith("email:") && !normalizeEmail(email)) {
+      acc.reconciledFromPhone = true;
+    }
     if (normalizeEmail(email)) acc.emails.add(normalizeEmail(email));
     if (normalizePhone(phone)) acc.phones.add(phone.trim());
     const at = new Date(b.start).getTime();
@@ -893,6 +914,9 @@ async function buildProfilesWithOverlay(
     const key = resolveKey(o.email, o.phone);
     if (!key) continue;
     const acc = getAcc(map, key);
+    if (key.startsWith("email:") && !normalizeEmail(o.email)) {
+      acc.reconciledFromPhone = true;
+    }
     if (normalizeEmail(o.email)) acc.emails.add(normalizeEmail(o.email));
     if (normalizePhone(o.phone)) acc.phones.add((o.phone ?? "").trim());
     const at = new Date(o.createdAt).getTime();
@@ -952,10 +976,24 @@ async function buildProfilesWithOverlay(
     // Attach overlays from the canonical clientId AND every phone-keyed id this
     // client owns — so a phone-only client's notes follow them once they gain
     // an email (the phone-keyed overlay merges into the email profile).
+    //
+    // F-2: when TWO emails share a phone (A=E1/P and B=E2/P), BOTH accumulate P
+    // in their phones set, so BOTH would otherwise compute the same phone-keyed
+    // id and attach the SAME phone-era overlay → the notes duplicate onto two
+    // cards. A phone CLAIMED by an email in phoneToEmailKey (first-wins) belongs
+    // to exactly ONE profile — only the WINNING email may attach that phone's
+    // overlay; the loser must not. A phone NO email claimed (claimedBy
+    // undefined) belongs to its own phone-keyed profile, already covered by
+    // acc.clientId. If the winner has no live profile the overlay stays
+    // unconsumed and surfaces as `unlinked` below — never duplicated, never
+    // silently dropped.
     const candidateIds = new Set<string>([acc.clientId]);
     for (const rawPhone of acc.phones) {
       const phoneKey = canonicalKey("", rawPhone);
-      if (phoneKey) candidateIds.add(clientIdFor(phoneKey));
+      if (!phoneKey) continue;
+      const claimedBy = phoneToEmailKey.get(phoneKey.slice("phone:".length));
+      if (claimedBy && claimedBy !== acc.canonicalKey) continue; // not the winner
+      candidateIds.add(clientIdFor(phoneKey));
     }
     const mergedNotes: ClientNote[] = [];
     const mergedTags = new Set<string>();
@@ -978,6 +1016,7 @@ async function buildProfilesWithOverlay(
       email: [...acc.emails][0] ?? "",
       phone: [...acc.phones][0] ?? "",
       matchedByPhone: acc.canonicalKey.startsWith("phone:"),
+      reconciledFromPhone: acc.reconciledFromPhone,
       lang,
       firstSeen,
       lastVisit: pastConfirmed[0]?.start ?? null,
