@@ -30,6 +30,9 @@ process.env.NOTIFY_EMAIL = "owner@example.com";
 process.env.ADMIN_USER = "";
 process.env.ADMIN_PASS = "";
 process.env.ADMIN_TOKEN = "";
+// Fixed secret so clientIdFor's HMAC runs the REAL (production) path offline
+// and stays deterministic across the harness.
+process.env.CRON_SECRET = "test-crm-clientid-secret";
 
 // --- fetch interception (prove the draft tool never sends) --------------------
 const resendCalls: { url: string }[] = [];
@@ -68,6 +71,9 @@ const {
   addTag,
   removeTag,
   setTags,
+  normalizeTag,
+  stripControlChars,
+  deleteClientRecords,
   listClientProfiles,
   getClientProfile,
   getClientsOverview,
@@ -85,7 +91,14 @@ const {
 const { buildSystemPrompt } = await import("../src/lib/concierge-prompt");
 const { buildDailyBriefEmail } = await import("../src/lib/daily-brief-email");
 const { GET: clientsGET } = await import("../src/app/api/admin/clients/route");
+const { PUT: tagsPUT } = await import(
+  "../src/app/api/admin/clients/[id]/tags/route"
+);
+const { DELETE: clientDELETE } = await import(
+  "../src/app/api/admin/clients/[id]/route"
+);
 const { NextRequest } = await import("next/server");
+const { createHash } = await import("node:crypto");
 
 import type { CrmStore, CrmDataSources, ClientProfile } from "../src/lib/crm";
 import type { StoredOrder } from "../src/lib/orders";
@@ -164,6 +177,11 @@ console.log("\n=== 1. Identity normalization + canonical key + clientId ===");
   const id = clientIdFor("email:a@b.com");
   check("clientId is 16 hex + stable", isValidClientId(id) && id === clientIdFor("email:a@b.com"));
   check("different keys → different clientIds", clientIdFor("email:a@b.com") !== clientIdFor("email:c@d.com"));
+  // HMAC-keyed (not a plain offline sha256 anyone could recompute from a
+  // guessed email). With CRON_SECRET set, the id must DIFFER from sha256(key).
+  const plainSha = createHash("sha256").update("email:a@b.com").digest("hex").slice(0, 16);
+  check("clientId is HMAC-keyed (≠ plain sha256 of the key)", id !== plainSha, `hmac=${id} sha=${plainSha}`);
+  check("clientId passes the ^[0-9a-f]{16}$ validation", isValidClientId(id) && !isValidClientId(id.toUpperCase()) && !isValidClientId("xyz"));
 }
 
 // ============================================================================
@@ -200,8 +218,13 @@ console.log("\n=== 3. Phone-only fallback merge (no email on either record) ==="
   const profiles = await listClientProfiles({}, { now: NOW, sources: makeSources(bookings, orders, []) });
   check("phone-only booking + order (same last 9) → ONE profile", profiles.length === 1, `count=${profiles.length}`);
   check("phone-only profile has both records", profiles[0]?.bookingsCount === 1 && profiles[0]?.ordersCount === 1);
+  check("phone-only profile is flagged matchedByPhone", profiles[0]?.matchedByPhone === true);
 
-  // A record WITH an email must NOT merge into a phone-only one by phone.
+  // RECONCILIATION (MAJOR-2): a phone-only record sharing a phone with an
+  // email-bearing record is folded INTO the email profile (the same client
+  // returning), so they do NOT split — the email key is authoritative and the
+  // phone-keyed records/overlay follow it. (Pre-fix this produced 2 profiles
+  // and could orphan the phone-keyed notes.)
   const mixed = await listClientProfiles({}, {
     now: NOW,
     sources: makeSources(
@@ -210,7 +233,8 @@ console.log("\n=== 3. Phone-only fallback merge (no email on either record) ==="
       []
     ),
   });
-  check("email record does NOT merge with phone-only by phone (2 profiles)", mixed.length === 2, `count=${mixed.length}`);
+  check("email + phone-only sharing a phone reconcile to ONE profile", mixed.length === 1, `count=${mixed.length}`);
+  check("reconciled profile is email-keyed + carries both records", mixed[0]?.canonicalKey === "email:x@e.com" && mixed[0]?.bookingsCount === 1 && mixed[0]?.ordersCount === 1);
 }
 
 // ============================================================================
@@ -278,7 +302,7 @@ console.log("\n=== 5. Re-booking radar (>N weeks, no upcoming, has past confirme
 }
 
 // ============================================================================
-console.log("\n=== 6. Overlay CRUD: one blob/client, paginated list, read-error throws ===");
+console.log("\n=== 6. Overlay CRUD: one blob PER NOTE, tags overlay, read-error throws ===");
 {
   const store = makeMemoryStore();
   __setCrmStore(store);
@@ -292,19 +316,33 @@ console.log("\n=== 6. Overlay CRUD: one blob/client, paginated list, read-error 
   const n2 = await addNote(idA, "allergic to lavender");
   check("two notes persisted on client A", (await getOverlay(idA)).notes.length === 2);
 
-  await addNote(idB, "VIP since 2024");
-  check("client B note is a SEPARATE blob (one blob per client)", store.dump().has(`crm/clients/${idA}.json`) && store.dump().has(`crm/clients/${idB}.json`));
+  // ONE BLOB PER NOTE: each note is its OWN blob under the client's notes
+  // prefix, NOT a single per-client document (this is what kills the RMW race).
+  check(
+    "each note is its own blob under crm/clients/<id>/notes/",
+    store.dump().has(`crm/clients/${idA}/notes/${n1.id}.json`) &&
+      store.dump().has(`crm/clients/${idA}/notes/${n2.id}.json`)
+  );
+  check(
+    "addNote writes NO per-client overlay document for notes",
+    !store.dump().has(`crm/clients/${idA}.json`)
+  );
+
+  const nb = await addNote(idB, "VIP since 2024");
+  check("client B note is under B's OWN prefix (isolated from A)", store.dump().has(`crm/clients/${idB}/notes/${nb.id}.json`) && !store.dump().has(`crm/clients/${idA}/notes/${nb.id}.json`));
   check("client B has its own single note", (await getOverlay(idB)).notes.length === 1);
 
   const removed = await removeNote(idA, n1.id);
-  check("removeNote deletes by id", removed === true && (await getOverlay(idA)).notes.length === 1);
+  check("removeNote deletes the note blob by id", removed === true && (await getOverlay(idA)).notes.length === 1 && !store.dump().has(`crm/clients/${idA}/notes/${n1.id}.json`));
   check("removeNote unknown id → false", (await removeNote(idA, "nope")) === false);
   check("remaining note is the second one", (await getOverlay(idA)).notes[0].id === n2.id);
 
   await addTag(idA, "  VIP  ");
   await addTag(idA, "vip"); // dedupe (normalized)
   await addTag(idA, "sensitive-skin");
+  check("tags live in the small per-client overlay blob", store.dump().has(`crm/clients/${idA}.json`));
   check("addTag normalizes + dedupes", JSON.stringify((await getOverlay(idA)).tags) === JSON.stringify(["vip", "sensitive-skin"]), JSON.stringify((await getOverlay(idA)).tags));
+  check("tags + notes coexist on the assembled overlay", (await getOverlay(idA)).notes.length === 1 && (await getOverlay(idA)).tags.length === 2);
   await removeTag(idA, "VIP");
   check("removeTag (case-insensitive) removes it", !(await getOverlay(idA)).tags.includes("vip"));
   const set = await setTags(idA, ["Returning", "returning", "gift"]);
@@ -314,10 +352,13 @@ console.log("\n=== 6. Overlay CRUD: one blob/client, paginated list, read-error 
 // ============================================================================
 console.log("\n=== 6b. CONCURRENT note-add to the SAME client → no lost update ===");
 {
-  __setCrmStore(makeMemoryStore());
+  const store = makeMemoryStore();
+  __setCrmStore(store);
   const id = clientIdFor("email:concurrent@e.com");
-  // Without the per-client lock, these async read-modify-writes interleave and
-  // the slower writer clobbers the others. The lock serializes them.
+  // With one-blob-per-note there is NO read-modify-write window: each addNote
+  // writes a distinct blob (distinct UUID), so concurrent adds — even across
+  // serverless instances — ALL persist. (The old single-document overlay lost
+  // updates here; this is the regression guard for that class.)
   await Promise.all([
     addNote(id, "note 1"),
     addNote(id, "note 2"),
@@ -328,6 +369,9 @@ console.log("\n=== 6b. CONCURRENT note-add to the SAME client → no lost update
   const overlay = await getOverlay(id);
   const texts = new Set(overlay.notes.map((n) => n.text));
   check("all 5 concurrent notes persisted (no lost update)", overlay.notes.length === 5 && texts.size === 5, `count=${overlay.notes.length}`);
+  // Five distinct note blobs, one per note.
+  const noteBlobs = [...store.dump().keys()].filter((k) => k.startsWith(`crm/clients/${id}/notes/`));
+  check("5 concurrent notes → 5 distinct note blobs", noteBlobs.length === 5, `blobs=${noteBlobs.length}`);
 }
 
 // ============================================================================
@@ -530,6 +574,143 @@ console.log("\n=== 10. Brief integration: re-booking section is additive ===");
   check("brief surfaces the most-overdue client first", withDue.text.indexOf("Overdue One") < withDue.text.indexOf("Overdue Two"));
   check("brief counts.rebooking reflects due clients", withDue.counts.rebooking === 2);
   check("brief is no longer an 'empty day' when only check-ins are due", !/enjoy the calm/.test(withDue.text));
+}
+
+// ============================================================================
+console.log("\n=== 11. Phone→email reconciliation + unlinked-overlay surfacing ===");
+{
+  // (a) A phone-only client gains a note, then later books WITH an email that
+  // carries the same phone (the phone-only visit has aged out). The phone-era
+  // note must follow them into the single email profile — never orphan.
+  __setCrmStore(makeMemoryStore());
+  const phoneClientId = clientIdFor("phone:001234567");
+  await addNote(phoneClientId, "phone-era-note-prefers-mornings");
+  const emailBooking = mkBooking(
+    "Facial Massage between Victoria and Lena",
+    "accepted",
+    daysAgo(10),
+    327658,
+    "lena@phone.com",
+    "+20 100 123 4567", // last 9 digits = 001234567 → same phone key
+    "Lena"
+  );
+  const profiles = await listClientProfiles({}, { now: NOW, sources: makeSources([emailBooking], [], []) });
+  check("phone-only note follows client once they gain an email → ONE profile", profiles.length === 1, `count=${profiles.length}`);
+  check("merged profile is email-keyed (reconciled, not matched-by-phone)", profiles[0]?.canonicalKey === "email:lena@phone.com" && profiles[0]?.matchedByPhone === false);
+  check("phone-era note RETAINED on the email profile (no orphan, no loss)", Boolean(profiles[0]?.notes.some((n) => n.text === "phone-era-note-prefers-mornings")));
+
+  // (b) Both a phone-only record AND an email record (same phone) present —
+  // they must reconcile into ONE profile, not split.
+  __setCrmStore(makeMemoryStore());
+  const phoneOnly = mkBooking("Facial Massage between Victoria and Lena", "accepted", daysAgo(60), 327658, "", "0100 123 4567", "Lena P");
+  const withEmail = mkBooking("Facial Massage between Victoria and Lena", "accepted", daysAgo(10), 327658, "lena@phone.com", "+20 100 123 4567", "Lena");
+  const reconciled = await listClientProfiles({}, { now: NOW, sources: makeSources([phoneOnly, withEmail], [], []) });
+  check("phone-only + later-email records reconcile to ONE profile (no split)", reconciled.length === 1, `count=${reconciled.length}`);
+  check("reconciled profile carries BOTH bookings", reconciled[0]?.bookingsCount === 2);
+
+  // (c) An overlay whose clientId matches NO current profile is SURFACED as
+  // unlinked — never silently dropped.
+  __setCrmStore(makeMemoryStore());
+  const orphanId = clientIdFor("email:ghost@nowhere.com");
+  await addNote(orphanId, "orphaned-note-no-records");
+  const present = mkBooking("Facial Massage between Victoria and Present", "accepted", daysAgo(5), 327658, "present@e.com", "0999", "Present");
+  const overview = await getClientsOverview({ now: NOW, sources: makeSources([present], [], []) });
+  check("overlay with no matching profile is SURFACED as unlinked", overview.unlinked.some((u) => u.clientId === orphanId && u.noteCount === 1));
+  check("unlinked note text is preserved (not lost)", overview.unlinked.find((u) => u.clientId === orphanId)?.notes[0]?.text === "orphaned-note-no-records");
+  check("orphaned note is NOT mis-attached to the unrelated profile", overview.profiles.every((p) => p.notes.every((n) => n.text !== "orphaned-note-no-records")));
+}
+
+// ============================================================================
+console.log("\n=== 12. Input sanitization: strip control chars on notes + tags ===");
+{
+  check("stripControlChars removes C0 + zero-width + bidi", stripControlChars("a\u0000b\u200Bc\u202E") === "abc");
+  check("stripControlChars KEEPS newlines (notes may span lines)", stripControlChars("line1\nline2") === "line1\nline2");
+  __setCrmStore(makeMemoryStore());
+  const cid = clientIdFor("email:ctrl@e.com");
+  const note = await addNote(cid, "hi\u0000\u202Ethere");
+  check("addNote strips control chars on input", note.text === "hithere", JSON.stringify(note.text));
+  check("normalizeTag strips control chars", normalizeTag("v\u0000ip\u200B") === "vip", JSON.stringify(normalizeTag("v\u0000ip\u200B")));
+}
+
+// ============================================================================
+console.log("\n=== 13. ISO-offset boundary robustness (offset form can't flip past/future) ===");
+{
+  __setCrmStore(makeMemoryStore());
+  // 13:00 at +02:00 == 11:00Z, which is BEFORE NOW (12:00Z) → PAST. Compared
+  // as RAW strings ("…13:00:00+02:00" vs "…12:00:00.000Z") it would sort as
+  // FUTURE — the bug toIso normalization defends against.
+  const offsetBooking = mkBooking("Facial Massage between Victoria and Off", "accepted", "2026-06-13T13:00:00+02:00", 327658, "off@e.com", "0100", "Off");
+  const profs = await listClientProfiles({}, { now: NOW, sources: makeSources([offsetBooking], [], []) });
+  check("offset-form PAST booking classified as past (lastVisit set, nextVisit null)", profs[0]?.lastVisit !== null && profs[0]?.nextVisit === null, `last=${profs[0]?.lastVisit} next=${profs[0]?.nextVisit}`);
+  check("stored booking start normalized to UTC Z", profs[0]?.bookings[0]?.start === "2026-06-13T11:00:00.000Z", profs[0]?.bookings[0]?.start);
+}
+
+// ============================================================================
+console.log("\n=== 14. Right-to-erasure: deleteClientRecords removes overlay + ALL notes ===");
+{
+  const store = makeMemoryStore();
+  __setCrmStore(store);
+  const cid = clientIdFor("email:erase@e.com");
+  const e1 = await addNote(cid, "note A");
+  const e2 = await addNote(cid, "note B");
+  await addTag(cid, "vip");
+  check("seed: overlay blob + 2 note blobs exist", store.dump().has(`crm/clients/${cid}.json`) && store.dump().has(`crm/clients/${cid}/notes/${e1.id}.json`) && store.dump().has(`crm/clients/${cid}/notes/${e2.id}.json`));
+  const erased = await deleteClientRecords(cid);
+  check("deleteClientRecords removes overlay + all note blobs (3)", erased.removed === 3, `removed=${erased.removed}`);
+  check("erased client reads back empty", (await getOverlay(cid)).notes.length === 0 && (await getOverlay(cid)).tags.length === 0);
+  check("no crm blob remains for the erased client", [...store.dump().keys()].filter((k) => k.includes(cid)).length === 0);
+
+  // Route-level (authenticated via the legacy admin token).
+  process.env.ADMIN_TOKEN = "erase-token";
+  const store2 = makeMemoryStore();
+  __setCrmStore(store2);
+  const cid2 = clientIdFor("email:erase2@e.com");
+  await addNote(cid2, "route-erased note");
+  const res = await clientDELETE(
+    new NextRequest(`https://book.victoriaholisticbeauty.com/api/admin/clients/${cid2}`, {
+      method: "DELETE",
+      headers: { "x-admin-key": "erase-token" },
+    }),
+    { params: Promise.resolve({ id: cid2 }) }
+  );
+  check("DELETE /api/admin/clients/<id> → 200 ok", res.status === 200, `status=${res.status}`);
+  check("route erasure cleared the client's blobs", [...store2.dump().keys()].filter((k) => k.includes(cid2)).length === 0);
+
+  // Unauthenticated erasure is refused.
+  process.env.ADMIN_TOKEN = "";
+  const denied = await clientDELETE(
+    new NextRequest(`https://book.victoriaholisticbeauty.com/api/admin/clients/${cid2}`, { method: "DELETE" }),
+    { params: Promise.resolve({ id: cid2 }) }
+  );
+  check("DELETE without auth → 401", denied.status === 401, `status=${denied.status}`);
+}
+
+// ============================================================================
+console.log("\n=== 15. tags route rejects an oversized array (>200) BEFORE processing ===");
+{
+  process.env.ADMIN_TOKEN = "tags-token";
+  __setCrmStore(makeMemoryStore());
+  const cid = clientIdFor("email:tags@e.com");
+  const huge = Array.from({ length: 201 }, (_, i) => `t${i}`);
+  const tooMany = await tagsPUT(
+    new NextRequest(`https://book.victoriaholisticbeauty.com/api/admin/clients/${cid}/tags`, {
+      method: "PUT",
+      headers: { "x-admin-key": "tags-token", "content-type": "application/json" },
+      body: JSON.stringify({ tags: huge }),
+    }),
+    { params: Promise.resolve({ id: cid }) }
+  );
+  check("PUT tags with >200 entries → 400 (rejected before processing)", tooMany.status === 400, `status=${tooMany.status}`);
+  const sane = await tagsPUT(
+    new NextRequest(`https://book.victoriaholisticbeauty.com/api/admin/clients/${cid}/tags`, {
+      method: "PUT",
+      headers: { "x-admin-key": "tags-token", "content-type": "application/json" },
+      body: JSON.stringify({ tags: ["VIP", "gift", "vip"] }),
+    }),
+    { params: Promise.resolve({ id: cid }) }
+  );
+  check("PUT tags with a sane set → 200 (normalized + deduped)", sane.status === 200, `status=${sane.status}`);
+  process.env.ADMIN_TOKEN = "";
 }
 
 // ============================================================================
