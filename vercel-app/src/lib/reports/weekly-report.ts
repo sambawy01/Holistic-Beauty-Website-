@@ -28,7 +28,40 @@ import { cairoSubjectDate, cairoWeekdayNow, type CairoWeekday } from "./shared";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const REVENUE_STATUSES = new Set(["confirmed", "shipped", "delivered"]);
+/**
+ * The single source of truth for which order statuses count as REVENUE:
+ * confirmed, shipped and delivered. Cancelled orders and still-unconfirmed
+ * "ordered" carts are NOT revenue. Exported so the finance P&L
+ * (@/lib/finance-report) computes the SAME shop number over a date range —
+ * there is exactly one revenue rule in the codebase.
+ */
+export const ORDER_REVENUE_STATUSES: ReadonlySet<string> = new Set([
+  "confirmed",
+  "shipped",
+  "delivered",
+]);
+
+/** Backwards-compatible local alias. */
+const REVENUE_STATUSES = ORDER_REVENUE_STATUSES;
+
+/**
+ * Sum EGP revenue over a set of orders, counting only revenue statuses
+ * (ORDER_REVENUE_STATUSES). The pure heart of the weekly report's revenue
+ * line, reused verbatim by the finance P&L so both agree by construction.
+ */
+export function orderRevenueEgp(orders: StoredOrder[]): number {
+  return orders
+    .filter((o) => REVENUE_STATUSES.has(o.status))
+    .reduce(
+      (sum, o) => sum + (Number.isFinite(o.totals?.egp) ? o.totals.egp : 0),
+      0
+    );
+}
+
+/** Orders among `orders` that count as revenue (statuses in the set). */
+export function revenueOrders(orders: StoredOrder[]): StoredOrder[] {
+  return orders.filter((o) => REVENUE_STATUSES.has(o.status));
+}
 
 /** A titled block of plain lines — text and HTML render from the same data. */
 export interface ReportSection {
@@ -118,13 +151,8 @@ function computeWeekStats(
   const inWeekOrders = orders.filter((o) =>
     keySet.has(cairoDateKey(new Date(o.createdAt)))
   );
-  const revenueOrders = inWeekOrders.filter((o) =>
-    REVENUE_STATUSES.has(o.status)
-  );
-  const revenueEgp = revenueOrders.reduce(
-    (sum, o) => sum + (Number.isFinite(o.totals?.egp) ? o.totals.egp : 0),
-    0
-  );
+  const inWeekRevenueOrders = revenueOrders(inWeekOrders);
+  const revenueEgp = orderRevenueEgp(inWeekOrders);
   const cancelledOrders = inWeekOrders.filter(
     (o) => o.status === "cancelled"
   ).length;
@@ -134,7 +162,7 @@ function computeWeekStats(
     confirmedBookings: confirmed.length,
     cancelledBookings,
     topTreatments,
-    ordersCount: revenueOrders.length,
+    ordersCount: inWeekRevenueOrders.length,
     revenueEgp,
     cancelledOrders,
   };
