@@ -45,6 +45,16 @@ import {
   resolvePeriod,
   type PnL,
 } from "../finance-report";
+import {
+  addNote,
+  addTag,
+  composeClientDraft,
+  isValidClientId,
+  rebookingRadar,
+  removeTag,
+  resolveClients,
+  type ClientProfile,
+} from "../crm";
 
 /**
  * Vassili's tool belt.
@@ -373,6 +383,75 @@ export const TOOLS: OllamaTool[] = [
     },
     ["period"]
   ),
+  tool(
+    "client_profile",
+    "Look up a client in the CRM by part of their name, email or phone (case-insensitive). Returns the matched client(s): visit history, treatments, total spend, shop orders, private notes and tags. Read-only. The CRM is PRIVATE — clients never see it.",
+    {
+      query: {
+        type: "string",
+        description:
+          "Part of the client's name, email or phone, e.g. 'mariam' or '@gmail.com'",
+      },
+    },
+    ["query"]
+  ),
+  tool(
+    "rebooking_radar",
+    "List clients due for a check-in: their last visit was more than N weeks ago and they have no upcoming booking. Most overdue first, each with how many weeks overdue and a suggested check-in DRAFT. Read-only.",
+    {
+      weeks: {
+        type: "number",
+        description: "Overdue threshold in weeks (default 6)",
+      },
+    }
+  ),
+  tool(
+    "client_note_add",
+    "Add a PRIVATE note to a client's CRM profile (not visible to the client). MUTATING — requires Victoria's button confirmation. Identify the client by clientId (from client_profile) or by a name/email that matches exactly one client.",
+    {
+      clientId: { type: "string", description: "Client id from client_profile (preferred)" },
+      identifier: {
+        type: "string",
+        description: "Alternatively, a name/email that matches one client",
+      },
+      text: { type: "string", description: "The note text" },
+    },
+    ["text"]
+  ),
+  tool(
+    "client_tag",
+    "Add or remove a private label (tag) on a client's CRM profile (e.g. 'vip', 'sensitive-skin'). MUTATING — requires Victoria's button confirmation. Identify the client by clientId or a name/email matching exactly one client.",
+    {
+      clientId: { type: "string", description: "Client id from client_profile (preferred)" },
+      identifier: {
+        type: "string",
+        description: "Alternatively, a name/email that matches one client",
+      },
+      action: { type: "string", enum: ["add", "remove"], description: "add or remove the tag" },
+      tag: { type: "string", description: "The tag, e.g. 'vip'" },
+    },
+    ["action", "tag"]
+  ),
+  tool(
+    "draft_client_email",
+    "Compose a branded client email DRAFT (check-in, thank-you, or a custom reply) for a given client. Returns the draft text to Victoria in chat — it does NOT send. To actually send it, use email_send (which asks for confirmation). Read-only.",
+    {
+      query: {
+        type: "string",
+        description: "Name / email / phone matching one client",
+      },
+      intent: {
+        type: "string",
+        enum: ["checkin", "reply", "thanks", "custom"],
+        description: "checkin = re-booking nudge; thanks = thank-you; reply/custom = frame your message",
+      },
+      message: {
+        type: "string",
+        description: "For reply/custom: the gist of what to say (optional otherwise)",
+      },
+    },
+    ["query", "intent"]
+  ),
 ];
 
 // --- Mutation gate ----------------------------------------------------------------
@@ -389,6 +468,8 @@ const MUTATING_TOOLS = new Set([
   "email_send",
   "log_expense",
   "log_income",
+  "client_note_add",
+  "client_tag",
 ]);
 
 /** Victoria's own addresses — email_send to these skips the confirm gate. */
@@ -646,6 +727,23 @@ export function describeMutation(
         `Log income: ${amount} EGP · ${s("category")} · ${s("method")} · ${when}` +
         `${s("note") ? ` — ${s("note")}` : ""}\n` +
         `→ Logs cash/off-platform income to your books (private — not visible to clients).`
+      );
+    }
+    case "client_note_add": {
+      const who = s("clientId") || s("identifier") || "(client)";
+      return (
+        `Add note to client ${who}:\n"${s("text")}"\n` +
+        `→ Private note on a client (not visible to the client).`
+      );
+    }
+    case "client_tag": {
+      const who = s("clientId") || s("identifier") || "(client)";
+      const action = s("action");
+      return (
+        `${action === "remove" ? "Remove" : "Add"} tag "${s("tag")}" ${
+          action === "remove" ? "from" : "on"
+        } client ${who}\n` +
+        `→ Private client label (not visible to the client).`
       );
     }
     default:
@@ -1330,6 +1428,182 @@ async function execFinancePnlDocument(
   } ${Math.abs(pnl.netEgp)} EGP).`;
 }
 
+// --- CRM (client profiles + notes/tags + drafts) ------------------------------
+
+function clientDateKey(iso: string | null): string {
+  if (!iso) return "never";
+  return cairoDayClock(iso);
+}
+
+/** One-block summary of a client profile for Vassili's chat replies. */
+function formatClientProfile(p: ClientProfile): string {
+  const lines = [
+    `${p.displayName}${p.email ? ` · ${p.email}` : ""}${p.phone ? ` · ${p.phone}` : ""} (id: ${p.clientId})`,
+    `Visits: ${p.bookingsCount} · last ${clientDateKey(p.lastVisit)}${
+      p.nextVisit ? ` · next ${clientDateKey(p.nextVisit)}` : " · no upcoming"
+    }`,
+    `Orders: ${p.ordersCount} · spend ${p.totalSpendEgp} EGP`,
+  ];
+  if (p.treatmentsList.length) {
+    lines.push(`Treatments: ${p.treatmentsList.slice(0, 6).join(", ")}`);
+  }
+  if (p.tags.length) lines.push(`Tags: ${p.tags.join(", ")}`);
+  if (p.notes.length) {
+    lines.push("Notes:");
+    for (const n of p.notes.slice(-5)) {
+      lines.push(`— ${n.text}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Resolve one client for a MUTATING tool: prefer an explicit clientId, else a
+ * name/email that matches EXACTLY one client. Returns a typed error string for
+ * the no-match / ambiguous cases so the executor reports it plainly.
+ */
+async function resolveOneClient(
+  args: Record<string, unknown>
+): Promise<{ ok: true; client: ClientProfile } | { ok: false; error: string }> {
+  const clientId =
+    typeof args.clientId === "string" ? args.clientId.trim() : "";
+  const identifier =
+    typeof args.identifier === "string" ? args.identifier.trim() : "";
+  const ref = clientId || identifier;
+  if (!ref) return { ok: false, error: "Give me a clientId or a name/email." };
+  if (clientId && !isValidClientId(clientId)) {
+    return { ok: false, error: `"${clientId}" is not a valid client id.` };
+  }
+  const matches = await resolveClients(ref);
+  if (matches.length === 0) {
+    return { ok: false, error: `No client matches "${ref}".` };
+  }
+  if (matches.length > 1) {
+    const names = matches
+      .slice(0, 6)
+      .map((m) => `${m.displayName} (${m.clientId})`)
+      .join("; ");
+    return {
+      ok: false,
+      error: `"${ref}" matches ${matches.length} clients: ${names}. Use a clientId.`,
+    };
+  }
+  return { ok: true, client: matches[0] };
+}
+
+async function execClientProfile(
+  args: Record<string, unknown>
+): Promise<string> {
+  const query = String(args.query ?? "").trim();
+  if (query.length < 2) {
+    return "Give me at least 2 characters of a client's name, email or phone.";
+  }
+  const matches = await resolveClients(query);
+  if (matches.length === 0) return `No client matches "${query}".`;
+  if (matches.length > 6) {
+    return (
+      `${matches.length} clients match "${query}". Top results:\n` +
+      matches
+        .slice(0, 6)
+        .map((m) => `— ${m.displayName} (${m.clientId}) · ${m.email || m.phone}`)
+        .join("\n") +
+      "\nNarrow the search or use a clientId."
+    );
+  }
+  return matches.map(formatClientProfile).join("\n\n");
+}
+
+async function execRebookingRadar(
+  args: Record<string, unknown>
+): Promise<string> {
+  const weeksRaw =
+    typeof args.weeks === "number" ? args.weeks : Number(args.weeks);
+  const weeks =
+    Number.isFinite(weeksRaw) && weeksRaw > 0 && weeksRaw <= 104
+      ? Math.floor(weeksRaw)
+      : 6;
+  const due = await rebookingRadar({ weeks });
+  if (due.length === 0) {
+    return `No clients are overdue for a check-in (threshold ${weeks} weeks).`;
+  }
+  const lines = [`${due.length} client(s) due for a check-in (${weeks}+ weeks):`];
+  for (const c of due.slice(0, 15)) {
+    lines.push(
+      `— ${c.displayName}${c.email ? ` · ${c.email}` : ""} · ${c.overdueWeeks}w overdue · last ${c.lastTreatment || "visit"} (id: ${c.clientId})`
+    );
+  }
+  lines.push(
+    "Use draft_client_email (intent checkin) to compose a check-in for any of them."
+  );
+  return lines.join("\n");
+}
+
+async function execClientNoteAdd(
+  args: Record<string, unknown>
+): Promise<string> {
+  const text = String(args.text ?? "").trim();
+  if (!text) return "Note text is required.";
+  const resolved = await resolveOneClient(args);
+  if (!resolved.ok) return resolved.error;
+  const note = await addNote(resolved.client.clientId, text);
+  return `Note added to ${resolved.client.displayName}: "${note.text}". (Private — the client never sees it.)`;
+}
+
+async function execClientTag(args: Record<string, unknown>): Promise<string> {
+  const action = String(args.action ?? "").trim();
+  const tag = String(args.tag ?? "").trim();
+  if (action !== "add" && action !== "remove") {
+    return 'action must be "add" or "remove".';
+  }
+  if (!tag) return "A tag is required.";
+  const resolved = await resolveOneClient(args);
+  if (!resolved.ok) return resolved.error;
+  const tags =
+    action === "add"
+      ? await addTag(resolved.client.clientId, tag)
+      : await removeTag(resolved.client.clientId, tag);
+  return `${action === "add" ? "Added" : "Removed"} tag "${tag.toLowerCase()}" ${
+    action === "add" ? "on" : "from"
+  } ${resolved.client.displayName}. Tags now: ${tags.length ? tags.join(", ") : "(none)"}.`;
+}
+
+async function execDraftClientEmail(
+  args: Record<string, unknown>
+): Promise<string> {
+  const query = String(args.query ?? "").trim();
+  const intentRaw = String(args.intent ?? "").trim();
+  const intent = (["checkin", "reply", "thanks", "custom"].includes(intentRaw)
+    ? intentRaw
+    : "reply") as "checkin" | "reply" | "thanks" | "custom";
+  const message =
+    typeof args.message === "string" ? args.message.trim() : undefined;
+  if (query.length < 2) {
+    return "Give me at least 2 characters of a client's name, email or phone.";
+  }
+  const matches = await resolveClients(query);
+  if (matches.length === 0) return `No client matches "${query}".`;
+  if (matches.length > 1) {
+    const names = matches
+      .slice(0, 6)
+      .map((m) => `${m.displayName} (${m.clientId})`)
+      .join("; ");
+    return `"${query}" matches ${matches.length} clients: ${names}. Narrow it down.`;
+  }
+  const client = matches[0];
+  const draft = composeClientDraft(client, intent, message);
+  return [
+    `DRAFT for ${client.displayName}${client.email ? ` (${client.email})` : ""} — review, not sent:`,
+    "",
+    `Subject: ${draft.subject}`,
+    "",
+    draft.body,
+    "",
+    client.email
+      ? `To send it: email_send to ${client.email} (I'll ask you to confirm).`
+      : "No email on file for this client — add one or send another way.",
+  ].join("\n");
+}
+
 const EXECUTORS: Record<string, Executor> = {
   bookings_today: () => execBookingsToday(),
   bookings_upcoming: () => execBookingsUpcoming(),
@@ -1370,6 +1644,11 @@ const EXECUTORS: Record<string, Executor> = {
   log_income: (args) => execLogLedger("income", args),
   finance_summary: (args) => execFinanceSummary(args),
   finance_pnl_document: (args, ctx) => execFinancePnlDocument(args, ctx),
+  client_profile: (args) => execClientProfile(args),
+  rebooking_radar: (args) => execRebookingRadar(args),
+  client_note_add: (args) => execClientNoteAdd(args),
+  client_tag: (args) => execClientTag(args),
+  draft_client_email: (args) => execDraftClientEmail(args),
 };
 
 /**
