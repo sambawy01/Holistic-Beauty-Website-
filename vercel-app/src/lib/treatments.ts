@@ -242,11 +242,48 @@ export function toPublicTreatment(t: Treatment): PublicTreatment {
 
 // --- Persistence ----------------------------------------------------------------
 
+/** Structural check for one stored treatment entry. */
+function isValidTreatment(value: unknown): value is Treatment {
+  const t = value as Treatment | null;
+  return (
+    typeof t === "object" &&
+    t !== null &&
+    typeof t.slug === "string" &&
+    t.slug.length > 0 &&
+    typeof t.eventTypeId === "number" &&
+    Number.isFinite(t.eventTypeId) &&
+    typeof t.name === "object" &&
+    t.name !== null &&
+    typeof t.name.en === "string" &&
+    t.name.en.length > 0 &&
+    typeof t.name.ru === "string" &&
+    typeof t.description === "object" &&
+    t.description !== null &&
+    typeof t.description.en === "string" &&
+    typeof t.description.ru === "string" &&
+    typeof t.durationMinutes === "number" &&
+    Number.isFinite(t.durationMinutes) &&
+    typeof t.priceEgp === "number" &&
+    Number.isFinite(t.priceEgp) &&
+    typeof t.priceRub === "number" &&
+    Number.isFinite(t.priceRub) &&
+    typeof t.active === "boolean" &&
+    typeof t.createdAt === "string" &&
+    typeof t.updatedAt === "string"
+  );
+}
+
 /**
  * Read the full treatments catalog. A missing blob (fresh store) falls back to
  * SEED; any other failure throws so callers can decide how to degrade — a
  * transient read error must never be mistaken for "empty store" by a writer,
  * or a subsequent save would clobber the real catalog with seed data.
+ *
+ * Per-item shape validation throws on ANY malformed entry (same policy as the
+ * not-an-array corrupt check): a garbage-but-array blob must surface as
+ * corruption so readers degrade to SEED, not flow through as a valid catalog
+ * — /api/treatments would otherwise serve a blanked/garbled menu and the
+ * static pages would hide every treatment row.
  */
 export async function getTreatmentsCatalog(): Promise<Treatment[]> {
   const result = await get(TREATMENTS_PATHNAME, {
@@ -259,6 +296,13 @@ export async function getTreatmentsCatalog(): Promise<Treatment[]> {
   const data = (await new Response(result.stream).json()) as unknown;
   if (!Array.isArray(data)) {
     throw new Error("Treatments blob is corrupt (not an array)");
+  }
+  for (const entry of data) {
+    if (!isValidTreatment(entry)) {
+      throw new Error(
+        `Treatments blob is corrupt (malformed entry: ${JSON.stringify(entry).slice(0, 200)})`
+      );
+    }
   }
   return data as Treatment[];
 }

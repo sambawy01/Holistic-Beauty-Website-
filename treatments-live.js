@@ -118,7 +118,42 @@
     return li;
   }
 
-  function apply(treatments) {
+  /* Structural check on one API entry — everything apply()/buildRow() reads.
+     A malformed entry must never reach the reconciler: hiding rows for a
+     garbled payload would blank the whole public menu. */
+  function isValidTreatment(t) {
+    return Boolean(
+      t &&
+        typeof t === "object" &&
+        typeof t.slug === "string" &&
+        t.slug &&
+        t.name &&
+        typeof t.name === "object" &&
+        typeof t.name.en === "string" &&
+        t.name.en &&
+        (t.name.ru === undefined || typeof t.name.ru === "string") &&
+        (t.description === undefined ||
+          t.description === null ||
+          typeof t.description === "object") &&
+        typeof t.durationMinutes === "number" &&
+        isFinite(t.durationMinutes) &&
+        typeof t.priceEgp === "number" &&
+        isFinite(t.priceEgp) &&
+        typeof t.priceRub === "number" &&
+        isFinite(t.priceRub)
+    );
+  }
+
+  function apply(rawTreatments) {
+    /* Skip invalid entries; if NOTHING valid remains, bail out entirely and
+       leave the server-rendered rows untouched — a corrupt API response must
+       degrade to the static menu, never hide it. */
+    var treatments = [];
+    for (var v = 0; v < rawTreatments.length; v++) {
+      if (isValidTreatment(rawTreatments[v])) treatments.push(rawTreatments[v]);
+    }
+    if (treatments.length === 0) return;
+
     var bySlug = {};
     for (var i = 0; i < treatments.length; i++) bySlug[treatments[i].slug] = treatments[i];
 

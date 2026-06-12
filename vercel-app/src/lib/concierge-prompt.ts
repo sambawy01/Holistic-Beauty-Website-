@@ -5,6 +5,7 @@ import {
   type Product,
 } from "@/lib/catalog";
 import { SEED as TREATMENTS_SEED, type Treatment } from "@/lib/treatments";
+import { SERVICES } from "@/lib/services";
 
 /**
  * Single source of truth for the AI concierge knowledge base and system prompt.
@@ -30,13 +31,69 @@ export const BRAND = {
   contactEmail: "victoria@victoriaholisticbeauty.com",
 };
 
-/** One prompt line per treatment: EN/RU names, optional sub-line, duration, prices. */
+/**
+ * Per-duration price variants for the multi-duration SEED treatments — the
+ * SAME options /book offers (its static SERVICES entries keep multi-duration
+ * toggles and range price lines; the per-duration prices below are the ones
+ * server-rendered on index.html/ru.html, e.g. "£2,300 60m · £3,350 90m").
+ * Without these the concierge would quote only the longest duration's price
+ * and disagree with /book about e.g. a 60-minute facial massage.
+ */
+const SEED_VARIANTS: Record<
+  string,
+  readonly { minutes: number; egp: number; rub: number }[]
+> = {
+  "facial-massage": [
+    { minutes: 60, egp: 2300, rub: 3100 },
+    { minutes: 90, egp: 3350, rub: 4700 },
+  ],
+  "body-massage": [
+    { minutes: 40, egp: 2500, rub: 3500 },
+    { minutes: 60, egp: 3350, rub: 4700 },
+  ],
+  hydrofacial: [
+    { minutes: 60, egp: 3700, rub: 5200 },
+    { minutes: 90, egp: 3700, rub: 5200 },
+  ],
+};
+
+/**
+ * Same match /book's treatmentToService uses: while a catalog treatment is
+ * still identical to its static SERVICES entry, /book serves the static
+ * multi-duration entry — so the concierge must quote the variants too. Once
+ * Victoria edits the treatment, /book collapses it to a single duration and
+ * price, and so do we.
+ */
+function matchesStaticService(t: Treatment): boolean {
+  const s = SERVICES.find((x) => x.slug === t.slug);
+  return Boolean(
+    s &&
+      s.eventTypeId === t.eventTypeId &&
+      Math.max(...s.durations) === t.durationMinutes &&
+      s.price.egp === t.priceEgp &&
+      s.price.rub === t.priceRub &&
+      s.en.title === t.name.en &&
+      s.ru.title === t.name.ru
+  );
+}
+
+/** One prompt line per treatment: EN/RU names, optional sub-line, duration(s), prices. */
 function formatTreatment(t: Treatment): string {
   const desc =
     t.description.en || t.description.ru
       ? ` (${[t.description.en, t.description.ru].filter(Boolean).join(" / ")})`
       : "";
-  return `- ${t.name.en} / ${t.name.ru}${desc} — ${t.durationMinutes} min — ${formatEgp(t.priceEgp)} / ${formatRub(t.priceRub)}`;
+  const variants = SEED_VARIANTS[t.slug];
+  const priced =
+    variants && matchesStaticService(t)
+      ? variants
+          .map(
+            (v) =>
+              `${v.minutes} min — ${formatEgp(v.egp)} / ${formatRub(v.rub)}`
+          )
+          .join("; ")
+      : `${t.durationMinutes} min — ${formatEgp(t.priceEgp)} / ${formatRub(t.priceRub)}`;
+  return `- ${t.name.en} / ${t.name.ru}${desc} — ${priced}`;
 }
 
 /** One prompt line per shop product: names, price, availability, copy, usage. */
