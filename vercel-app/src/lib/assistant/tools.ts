@@ -29,6 +29,22 @@ import { buildDailyBriefEmail } from "../daily-brief-email";
 import { gatherDailyBriefData } from "../daily-brief-data";
 import { renderLetterheadPdf } from "./letterhead-pdf";
 import { sendDocument } from "../telegram";
+import {
+  addLedgerEntry,
+  categoriesFor,
+  isValidDateKey,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  PAYMENT_METHODS,
+  type LedgerDirection,
+  type PaymentMethod,
+} from "../finance";
+import {
+  buildPnL,
+  pnlToLetterheadBody,
+  resolvePeriod,
+  type PnL,
+} from "../finance-report";
 
 /**
  * Vassili's tool belt.
@@ -281,6 +297,82 @@ export const TOOLS: OllamaTool[] = [
     },
     ["orderNumber"]
   ),
+  tool(
+    "log_expense",
+    "Record a business EXPENSE in Victoria's private finance ledger (rent, supplies, product stock, marketing, salaries, utilities, bank fees, other). MUTATING — requires Victoria's button confirmation. The ledger is private (clients never see it).",
+    {
+      category: {
+        type: "string",
+        enum: [...EXPENSE_CATEGORIES],
+        description: "Expense category",
+      },
+      amountEgp: { type: "number", description: "Amount in EGP (positive)" },
+      method: {
+        type: "string",
+        enum: [...PAYMENT_METHODS],
+        description: "How it was paid",
+      },
+      note: { type: "string", description: "Optional note, e.g. 'Onmacabim restock'" },
+      date: {
+        type: "string",
+        description: "Date YYYY-MM-DD (omit = today, Cairo)",
+      },
+    },
+    ["category", "amountEgp", "method"]
+  ),
+  tool(
+    "log_income",
+    "Record off-platform/cash INCOME in Victoria's private finance ledger (treatment paid in cash, gift card, other). Do NOT use this for shop orders or online bookings — those are counted automatically. MUTATING — requires Victoria's button confirmation.",
+    {
+      category: {
+        type: "string",
+        enum: [...INCOME_CATEGORIES],
+        description: "Income category",
+      },
+      amountEgp: { type: "number", description: "Amount in EGP (positive)" },
+      method: {
+        type: "string",
+        enum: [...PAYMENT_METHODS],
+        description: "How it was received",
+      },
+      note: { type: "string", description: "Optional note" },
+      date: {
+        type: "string",
+        description: "Date YYYY-MM-DD (omit = today, Cairo)",
+      },
+    },
+    ["category", "amountEgp", "method"]
+  ),
+  tool(
+    "finance_summary",
+    "Profit & Loss for a period: revenue (shop orders + treatments + cash/other income), expenses by category, and net. Read-only.",
+    {
+      period: {
+        type: "string",
+        enum: ["week", "month", "custom"],
+        description:
+          "week = current Mon–Sun, month = current calendar month, custom = use from/to",
+      },
+      from: { type: "string", description: "Custom range start, YYYY-MM-DD" },
+      to: { type: "string", description: "Custom range end, YYYY-MM-DD" },
+    },
+    ["period"]
+  ),
+  tool(
+    "finance_pnl_document",
+    "Generate a Profit & Loss statement on the company letterhead (PDF) for a period and send it to Victoria in this chat. Read-only (goes only to Victoria).",
+    {
+      period: {
+        type: "string",
+        enum: ["week", "month", "custom"],
+        description:
+          "week = current Mon–Sun, month = current calendar month, custom = use from/to",
+      },
+      from: { type: "string", description: "Custom range start, YYYY-MM-DD" },
+      to: { type: "string", description: "Custom range end, YYYY-MM-DD" },
+    },
+    ["period"]
+  ),
 ];
 
 // --- Mutation gate ----------------------------------------------------------------
@@ -295,6 +387,8 @@ const MUTATING_TOOLS = new Set([
   "product_remove",
   "block_time",
   "email_send",
+  "log_expense",
+  "log_income",
 ]);
 
 /** Victoria's own addresses — email_send to these skips the confirm gate. */
@@ -523,6 +617,24 @@ export function describeMutation(
         `——————————————\n` +
         `→ This exact email goes to ${s("to")} from bookings@victoriaholisticbeauty.com.`
       );
+    case "log_expense": {
+      const amount = typeof args.amountEgp === "number" ? args.amountEgp : "?";
+      const when = s("date") || "today";
+      return (
+        `Log expense: ${amount} EGP · ${s("category")} · ${s("method")} · ${when}` +
+        `${s("note") ? ` — ${s("note")}` : ""}\n` +
+        `→ Logs an expense to your books (private — not visible to clients).`
+      );
+    }
+    case "log_income": {
+      const amount = typeof args.amountEgp === "number" ? args.amountEgp : "?";
+      const when = s("date") || "today";
+      return (
+        `Log income: ${amount} EGP · ${s("category")} · ${s("method")} · ${when}` +
+        `${s("note") ? ` — ${s("note")}` : ""}\n` +
+        `→ Logs cash/off-platform income to your books (private — not visible to clients).`
+      );
+    }
     default:
       return `${name}(${JSON.stringify(args)})`;
   }
@@ -1093,6 +1205,118 @@ async function execDocumentCreate(
   }`;
 }
 
+async function execLogLedger(
+  direction: LedgerDirection,
+  args: Record<string, unknown>
+): Promise<string> {
+  const category = String(args.category ?? "").trim();
+  if (!categoriesFor(direction).includes(category)) {
+    return `Invalid ${direction} category "${category}". Use one of: ${categoriesFor(direction).join(", ")}.`;
+  }
+  const amountEgp =
+    typeof args.amountEgp === "number" ? args.amountEgp : Number(args.amountEgp);
+  if (!Number.isFinite(amountEgp) || amountEgp <= 0) {
+    return "Amount must be a positive number of EGP.";
+  }
+  const method = String(args.method ?? "").trim();
+  if (!(PAYMENT_METHODS as readonly string[]).includes(method)) {
+    return `Invalid method "${method}". Use one of: ${PAYMENT_METHODS.join(", ")}.`;
+  }
+  const rawDate = typeof args.date === "string" ? args.date.trim() : "";
+  const date = rawDate || cairoDateKey(new Date());
+  if (!isValidDateKey(date)) {
+    return `Invalid date "${rawDate}" — use YYYY-MM-DD.`;
+  }
+  const note = typeof args.note === "string" ? args.note.trim().slice(0, 1000) : "";
+
+  const entry = await addLedgerEntry({
+    date,
+    direction,
+    category,
+    amountEgp: Math.round(amountEgp * 100) / 100,
+    method: method as PaymentMethod,
+    note,
+  });
+  const verb = direction === "expense" ? "Expense" : "Income";
+  return `${verb} logged: ${entry.amountEgp} EGP · ${category} · ${method} · ${date}${
+    note ? ` — ${note}` : ""
+  }. (Private — clients never see your books.)`;
+}
+
+/** Resolve a {period, from, to} arg bundle into a concrete P&L period. */
+function resolveToolPeriod(
+  args: Record<string, unknown>
+): { ok: true; pnl: Promise<PnL>; label: string } | { ok: false; error: string } {
+  const period = String(args.period ?? "month") as "week" | "month" | "custom";
+  if (!["week", "month", "custom"].includes(period)) {
+    return { ok: false, error: 'period must be "week", "month" or "custom".' };
+  }
+  const resolved = resolvePeriod({
+    period,
+    from: typeof args.from === "string" ? args.from : undefined,
+    to: typeof args.to === "string" ? args.to : undefined,
+  });
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+  return {
+    ok: true,
+    pnl: buildPnL(resolved.period),
+    label: resolved.period.label,
+  };
+}
+
+async function execFinanceSummary(
+  args: Record<string, unknown>
+): Promise<string> {
+  const resolved = resolveToolPeriod(args);
+  if (!resolved.ok) return resolved.error;
+  const pnl = await resolved.pnl;
+
+  const lines = [
+    `P&L for ${pnl.period.label}:`,
+    `Revenue — ${pnl.revenue.totalEgp} EGP total`,
+    `  · shop orders: ${pnl.revenue.shopEgp} EGP`,
+    `  · treatments (confirmed bookings): ${pnl.revenue.treatmentsEgp} EGP`,
+    `  · cash/other income: ${pnl.revenue.manualIncomeEgp} EGP`,
+    `Expenses — ${pnl.expenses.totalEgp} EGP total`,
+  ];
+  for (const c of pnl.expenses.byCategory) {
+    lines.push(`  · ${c.category}: ${c.amountEgp} EGP`);
+  }
+  if (pnl.expenses.byCategory.length === 0) {
+    lines.push("  · (no expenses logged)");
+  }
+  lines.push(
+    `Net — ${pnl.netEgp >= 0 ? "profit" : "loss"} ${Math.abs(pnl.netEgp)} EGP`
+  );
+  if (pnl.failures.length) {
+    lines.push(`(Heads up: couldn't load ${pnl.failures.join(", ")} — may be incomplete.)`);
+  }
+  return lines.join("\n");
+}
+
+async function execFinancePnlDocument(
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<string> {
+  const resolved = resolveToolPeriod(args);
+  if (!resolved.ok) return resolved.error;
+  const pnl = await resolved.pnl;
+
+  const { pdf } = await renderLetterheadPdf({
+    title: `Profit & Loss — ${pnl.period.label}`,
+    body: pnlToLetterheadBody(pnl),
+  });
+  const filename =
+    `pnl-${pnl.period.tag}`.replace(/[^a-z0-9_-]+/gi, "-").slice(0, 60) || "pnl";
+  const sent = await sendDocument(ctx.chatId, `${filename}.pdf`, pdf, {
+    caption: `P&L — ${pnl.period.label}`,
+  });
+  if (!sent.ok) return "P&L PDF was generated but sending to Telegram failed.";
+  return `P&L statement for ${pnl.period.label} sent to the chat (net ${
+    pnl.netEgp >= 0 ? "profit" : "loss"
+  } ${Math.abs(pnl.netEgp)} EGP).`;
+}
+
 const EXECUTORS: Record<string, Executor> = {
   bookings_today: () => execBookingsToday(),
   bookings_upcoming: () => execBookingsUpcoming(),
@@ -1129,6 +1353,10 @@ const EXECUTORS: Record<string, Executor> = {
   daily_brief: () => execDailyBrief(),
   email_send: (args) => execEmailSend(args),
   document_create: (args, ctx) => execDocumentCreate(args, ctx),
+  log_expense: (args) => execLogLedger("expense", args),
+  log_income: (args) => execLogLedger("income", args),
+  finance_summary: (args) => execFinanceSummary(args),
+  finance_pnl_document: (args, ctx) => execFinancePnlDocument(args, ctx),
 };
 
 /**
