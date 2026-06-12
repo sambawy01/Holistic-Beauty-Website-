@@ -109,11 +109,12 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 const { POST: webhookPOST } = await import("../src/app/api/telegram/webhook/route");
 const { getOwnerChatId } = await import("../src/lib/assistant/state");
 const { getCatalog, saveCatalog } = await import("../src/lib/catalog");
-const { del } = await import("@vercel/blob");
+const { del, get } = await import("@vercel/blob");
 
 // --- helpers ---------------------------------------------------------------------------
 const OWNER_CHAT = 770_077_001;
 const STRANGER_CHAT = 990_099_009;
+const STRANGER2_CHAT = 880_088_008;
 let updateId = 1;
 let messageId = 100;
 
@@ -132,19 +133,25 @@ async function sendText(chatId: number, text: string) {
   const res = await webhookPOST(
     tgRequest({
       update_id: updateId++,
-      message: { message_id: messageId++, chat: { id: chatId, type: "private" }, text },
+      message: {
+        message_id: messageId++,
+        chat: { id: chatId, type: "private" },
+        from: { id: chatId, first_name: "Test" },
+        text,
+      },
     }) as never
   );
   return res;
 }
 
-async function tapButton(chatId: number, data: string) {
+async function tapButton(chatId: number, data: string, fromId?: number) {
   return webhookPOST(
     tgRequest({
       update_id: updateId++,
       callback_query: {
         id: `cbq-${updateId}`,
         data,
+        from: { id: fromId ?? chatId, first_name: "Test" },
         message: { message_id: 4242, chat: { id: chatId, type: "private" } },
       },
     }) as never
@@ -170,15 +177,50 @@ function lastKeyboardPendingId(): string | null {
   return null;
 }
 
+/** sendMessage calls to a given chat whose text matches. */
+function messagesTo(chatId: number, re: RegExp): Captured[] {
+  return telegramCalls.filter((c) => {
+    const b = c.body as { chat_id?: number; text?: string } | undefined;
+    return (
+      c.url.includes("sendMessage") &&
+      b?.chat_id === chatId &&
+      re.test(String(b?.text ?? ""))
+    );
+  });
+}
+
+const ALERT_RE = /tried to access Vassili/;
+const REFUSAL_RE = /private assistant/;
+
+async function readAuditEntries(): Promise<
+  { at?: string; chatId?: number; kind?: string; detail?: Record<string, unknown> }[]
+> {
+  const r = await get("telegram/audit.jsonl", { access: "private", useCache: false });
+  if (!r || r.statusCode !== 200) return [];
+  const text = await new Response(r.stream).text();
+  return text
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as { chatId?: number; kind?: string };
+      } catch {
+        return {};
+      }
+    });
+}
+
 let failures = 0;
 function check(name: string, cond: boolean, detail = "") {
   console.log(`${cond ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!cond) failures++;
 }
 
+const RUN_STARTED_AT = new Date().toISOString();
+
 // ====================================================================================
 console.log("=== 0. Reset telegram/* state (idempotent harness) ===");
-for (const path of ["telegram/owner.json", "telegram/history.json"]) {
+for (const path of ["telegram/owner.json", "telegram/history.json", "telegram/alerts.json"]) {
   try {
     await del(path);
     console.log("deleted stale", path);
@@ -218,6 +260,21 @@ console.log("\n=== 1. Gates: no token / bad secret / strangers ===");
   const owner = await getOwnerChatId();
   check("owner NOT bound after wrong pass", owner !== OWNER_CHAT, `owner=${owner}`);
 }
+{
+  // Empty ADMIN_PASS must fail closed — no empty-string bypass, ever.
+  const savedPass = process.env.ADMIN_PASS;
+  process.env.ADMIN_PASS = "";
+  telegramCalls.length = 0;
+  await sendText(OWNER_CHAT, "/start"); // empty supplied pass vs empty ADMIN_PASS
+  await sendText(OWNER_CHAT, "/start anything");
+  check("empty ADMIN_PASS → binding impossible", (await getOwnerChatId()) === null);
+  check(
+    "empty ADMIN_PASS → refusal (not greeting)",
+    messagesTo(OWNER_CHAT, REFUSAL_RE).length === 2 &&
+      messagesTo(OWNER_CHAT, /ops assistant/).length === 0
+  );
+  process.env.ADMIN_PASS = savedPass;
+}
 
 console.log("\n=== 2. Owner binding ===");
 {
@@ -226,6 +283,131 @@ console.log("\n=== 2. Owner binding ===");
   check("greeting after correct pass", lastTelegramText().includes("ops assistant"));
   const owner = await getOwnerChatId();
   check("Blob owner.json bound to chat", owner === OWNER_CHAT, `owner=${owner}`);
+}
+
+console.log("\n=== 2b. Hardening: one-time binding, intrusion alerts, audit ===");
+{
+  // (a) stranger /start with a WRONG password after binding → refusal + alert
+  telegramCalls.length = 0;
+  await sendText(STRANGER_CHAT, "/start hunter2");
+  check(
+    "stranger wrong-pass /start → generic refusal",
+    messagesTo(STRANGER_CHAT, REFUSAL_RE).length === 1
+  );
+  check(
+    "owner alerted about wrong-pass attempt",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 1,
+    JSON.stringify(messagesTo(OWNER_CHAT, ALERT_RE)[0]?.body).slice(0, 160)
+  );
+
+  // (b) stranger /start with the CORRECT password after binding → NO rebind
+  telegramCalls.length = 0;
+  await sendText(STRANGER_CHAT, `/start ${ADMIN_PASS}`);
+  check(
+    "correct-pass /start from stranger → generic refusal (no greeting leak)",
+    messagesTo(STRANGER_CHAT, REFUSAL_RE).length === 1 &&
+      messagesTo(STRANGER_CHAT, /ops assistant|already connected/i).length === 0
+  );
+  check(
+    "binding NOT hijacked — owner unchanged",
+    (await getOwnerChatId()) === OWNER_CHAT
+  );
+  check(
+    "owner alerted about correct-pass rebind attempt",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 1 &&
+      /CORRECT password/.test(
+        String((messagesTo(OWNER_CHAT, ALERT_RE)[0]?.body as { text?: string })?.text)
+      )
+  );
+
+  // owner /start again → friendly idempotent reply, no alert, no rebind error
+  telegramCalls.length = 0;
+  await sendText(OWNER_CHAT, `/start ${ADMIN_PASS}`);
+  check(
+    "owner /start again → friendly already-connected reply",
+    /already connected/i.test(lastTelegramText()),
+    lastTelegramText().slice(0, 100)
+  );
+  check(
+    "owner /start does not trigger an alert",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 0
+  );
+
+  // (c) stranger plain message → refusal + first-contact alert (3rd alert in window)
+  telegramCalls.length = 0;
+  await sendText(STRANGER_CHAT, "hey, what's Victoria's schedule?");
+  check(
+    "stranger plain message → refusal",
+    messagesTo(STRANGER_CHAT, REFUSAL_RE).length === 1
+  );
+  check(
+    "first-contact alert for stranger message",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 1
+  );
+
+  // rate cap: 4th alert-eligible attempt within the hour → NO alert
+  telegramCalls.length = 0;
+  await sendText(STRANGER_CHAT, "/start another-guess");
+  check(
+    "4th attempt still refused",
+    messagesTo(STRANGER_CHAT, REFUSAL_RE).length === 1
+  );
+  check(
+    "alert rate-limit: 4th attempt within the hour → NO alert",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 0
+  );
+
+  // day-gating for plain messages (fresh stranger, cap untouched)
+  telegramCalls.length = 0;
+  await sendText(STRANGER2_CHAT, "hello?");
+  check(
+    "second stranger first message → alert",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 1
+  );
+  telegramCalls.length = 0;
+  await sendText(STRANGER2_CHAT, "are you ignoring me?");
+  check(
+    "second stranger repeat message same day → NO alert (day gate)",
+    messagesTo(OWNER_CHAT, ALERT_RE).length === 0
+  );
+  check(
+    "…but still refused",
+    messagesTo(STRANGER2_CHAT, REFUSAL_RE).length === 1
+  );
+
+  // stranger callback tap → privately refused, nothing executes
+  telegramCalls.length = 0;
+  calMutations.length = 0;
+  await tapButton(STRANGER2_CHAT, "confirm:00000000-0000-4000-8000-000000000000");
+  const cbAnswer = telegramCalls.find((c) => c.url.includes("answerCallbackQuery"));
+  check(
+    "stranger callback tap → answered 'private', no mutation",
+    Boolean(cbAnswer) && calMutations.length === 0
+  );
+
+  // audit completeness — only entries written by THIS run count
+  const audit = await readAuditEntries();
+  const has = (kind: string, chatId: number) =>
+    audit.some(
+      (e) =>
+        e.kind === kind &&
+        e.chatId === chatId &&
+        typeof e.at === "string" &&
+        e.at >= RUN_STARTED_AT
+    );
+  check("audit: start-wrong-pass logged", has("start-wrong-pass", STRANGER_CHAT));
+  check(
+    "audit: start-rebind-blocked logged",
+    has("start-rebind-blocked", STRANGER_CHAT)
+  );
+  check(
+    "audit: unauthorized-message logged",
+    has("unauthorized-message", STRANGER_CHAT)
+  );
+  check(
+    "audit: unauthorized-callback logged",
+    has("unauthorized-callback", STRANGER2_CHAT)
+  );
 }
 
 console.log("\n=== 3. \"what's my day?\" (real brief data via real Ollama+Cal+Blob) ===");
@@ -386,7 +568,7 @@ console.log("\n=== 8. Daily-brief cron pushes to Telegram ===");
 }
 
 console.log("\n=== cleanup: remove test telegram/* state from Blob ===");
-for (const path of ["telegram/owner.json", "telegram/history.json"]) {
+for (const path of ["telegram/owner.json", "telegram/history.json", "telegram/alerts.json"]) {
   try {
     await del(path);
     console.log("deleted", path);

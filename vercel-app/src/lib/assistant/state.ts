@@ -9,6 +9,7 @@ import { del, get, put } from "@vercel/blob";
  * - telegram/history.json        — rolling conversation memory (last ~12 turns)
  * - telegram/pending/<uuid>.json — confirmation-gated actions awaiting a tap
  * - telegram/audit.jsonl         — append-only action log (best effort)
+ * - telegram/alerts.json         — intrusion-alert rate-limit state per stranger
  *
  * All reads use `useCache: false` — every document here is read-modify-write
  * and a stale CDN copy would replay an executed pending action or lose turns.
@@ -57,11 +58,97 @@ export async function getOwnerChatId(): Promise<number | null> {
   return owner && typeof owner.chatId === "number" ? owner.chatId : null;
 }
 
+/**
+ * Bind the owner chat. One-time by design: callers must check
+ * `getOwnerChatId()` first and refuse when a binding already exists —
+ * re-binding requires manually deleting telegram/owner.json from Blob.
+ */
 export async function bindOwner(chatId: number): Promise<void> {
   await writeJson(OWNER_PATH, {
     chatId,
     boundAt: new Date().toISOString(),
   } satisfies OwnerRecord);
+}
+
+// --- Intrusion alert rate limiting --------------------------------------------
+
+const ALERTS_PATH = "telegram/alerts.json";
+
+/** At most this many owner alerts per stranger chat per rolling window. */
+export const ALERT_MAX_PER_WINDOW = 3;
+export const ALERT_WINDOW_MS = 60 * 60 * 1000;
+/** Drop rate-limit records for strangers idle longer than this. */
+const ALERT_RECORD_TTL_MS = 48 * 60 * 60 * 1000;
+
+export type IntrusionKind =
+  | "start-wrong-pass" // /start with a wrong (or missing/empty) password
+  | "start-rebind-blocked" // /start with the CORRECT password after binding
+  | "unauthorized-message" // any other message from a non-owner chat
+  | "unauthorized-callback"; // confirmation-button tap from a non-owner
+
+interface AlertRecord {
+  windowStart: number;
+  count: number;
+  /** YYYY-MM-DD (UTC) of the last plain-contact alert consideration. */
+  lastContactDay?: string;
+}
+
+/**
+ * Decide whether an intrusion by `strangerChatId` should produce an alert to
+ * the owner, and record the attempt. Policy:
+ * - /start attempts (wrong pass, or correct pass post-binding) always alert,
+ *   capped at ALERT_MAX_PER_WINDOW per stranger per hour.
+ * - Plain messages / callback taps alert only on first contact per stranger
+ *   per UTC day, and still count against the hourly cap.
+ *
+ * Best effort (read-modify-write on Blob, not atomic): if state is
+ * unreadable we fail OPEN (alert anyway) — the cap protects Victoria from
+ * notification noise; it is not a security boundary.
+ */
+export async function shouldAlertOwner(
+  strangerChatId: number,
+  kind: IntrusionKind
+): Promise<boolean> {
+  try {
+    const file =
+      (await readJson<Record<string, AlertRecord>>(ALERTS_PATH)) ?? {};
+    const key = String(strangerChatId);
+    const now = Date.now();
+    const today = new Date(now).toISOString().slice(0, 10);
+
+    let rec = file[key];
+    if (
+      !rec ||
+      !Number.isFinite(rec.windowStart) ||
+      now - rec.windowStart >= ALERT_WINDOW_MS
+    ) {
+      rec = { windowStart: now, count: 0, lastContactDay: rec?.lastContactDay };
+    }
+
+    let alert = true;
+    if (kind === "unauthorized-message" || kind === "unauthorized-callback") {
+      if (rec.lastContactDay === today) alert = false;
+      rec.lastContactDay = today;
+    }
+    if (alert && rec.count >= ALERT_MAX_PER_WINDOW) alert = false;
+    if (alert) rec.count += 1;
+    file[key] = rec;
+
+    // Keep the file bounded: drop strangers not seen for ALERT_RECORD_TTL_MS.
+    for (const [k, v] of Object.entries(file)) {
+      const lastDay = v.lastContactDay
+        ? Date.parse(`${v.lastContactDay}T00:00:00Z`)
+        : 0;
+      const lastSeen = Math.max(v.windowStart || 0, lastDay);
+      if (now - lastSeen > ALERT_RECORD_TTL_MS) delete file[k];
+    }
+
+    await writeJson(ALERTS_PATH, file);
+    return alert;
+  } catch (error) {
+    console.error("[assistant] Alert rate-limit state failed:", error);
+    return true;
+  }
 }
 
 // --- Conversation memory -------------------------------------------------------
