@@ -286,12 +286,20 @@ export function computePnL(period: PnLPeriod, inputs: PnLInputs): PnL {
   const revenueOrderCount = revenueOrders(inRangeOrders).length;
 
   // --- treatments (confirmed Cal bookings by START date × catalog price) ---
+  //
+  // Match a booking to its catalogue price by eventTypeId FIRST — the stable
+  // Cal.com identifier that survives title renames, Russian-language titles,
+  // and "combined session" titles. Only when a booking carries no usable
+  // eventTypeId do we fall back to the (fragile) service-title match. The
+  // priceByEventTypeId map is built from the treatments catalogue.
+  const priceByEventTypeId = new Map<number, { price: number; display: string }>();
   const priceByName = new Map<string, { price: number; display: string }>();
   for (const t of inputs.treatments) {
-    priceByName.set(t.name.en.trim().toLowerCase(), {
-      price: t.priceEgp,
-      display: t.name.en,
-    });
+    const lookup = { price: t.priceEgp, display: t.name.en };
+    if (typeof t.eventTypeId === "number") {
+      priceByEventTypeId.set(t.eventTypeId, lookup);
+    }
+    priceByName.set(t.name.en.trim().toLowerCase(), lookup);
   }
   const inRangeBookings = inputs.bookings.filter((b) => {
     const k = cairoKeyOf(b.start);
@@ -303,8 +311,15 @@ export function computePnL(period: PnLPeriod, inputs: PnLInputs): PnL {
   const treatmentAgg = new Map<string, { count: number; amountEgp: number }>();
   let unmatchedBookings = 0;
   for (const b of inRangeBookings) {
-    const title = serviceTitle(b);
-    const match = priceByName.get(title.trim().toLowerCase());
+    // eventTypeId is AUTHORITATIVE when present (a positive number): a booking
+    // that carries one is priced by eventTypeId only — never by title — so a
+    // present-but-uncatalogued eventTypeId is correctly counted as unmatched
+    // rather than being rescued by a coincidental title match. The fragile
+    // service-title match is used ONLY when the booking has no eventTypeId.
+    const hasEventType = typeof b.eventTypeId === "number" && b.eventTypeId > 0;
+    const match = hasEventType
+      ? priceByEventTypeId.get(b.eventTypeId)
+      : priceByName.get(serviceTitle(b).trim().toLowerCase());
     if (!match) {
       unmatchedBookings++;
       continue;
@@ -440,9 +455,30 @@ export async function buildPnL(
 
 // --- CSV export ---------------------------------------------------------------
 
-/** RFC-4180 field escaping: quote when the value holds comma/quote/newline. */
+/**
+ * Leading characters a spreadsheet treats as the start of a FORMULA. A cell
+ * beginning with one of these can execute on open (CSV injection / DDE).
+ */
+const CSV_FORMULA_LEAD_RE = /^[=+\-@\t\r]/;
+
+/**
+ * RFC-4180 field escaping with a formula-injection guard for STRING cells.
+ *
+ * Numbers are emitted verbatim — `netEgp` can legitimately be negative, and a
+ * leading "-" on a NUMBER is a real value the sheet must keep numeric, never a
+ * formula. For STRING cells (notes, categories), a value starting with one of
+ * the formula lead characters is prefixed with a single apostrophe so the
+ * spreadsheet renders it as literal text instead of evaluating it.
+ */
 function csvField(value: string | number): string {
-  const s = String(value);
+  if (typeof value === "number") {
+    // Numeric cells stay numeric — negatives included.
+    return String(value);
+  }
+  let s = value;
+  if (CSV_FORMULA_LEAD_RE.test(s)) {
+    s = `'${s}`;
+  }
   if (/[",\n\r]/.test(s)) {
     return `"${s.replace(/"/g, '""')}"`;
   }
@@ -488,6 +524,14 @@ export function pnlToCsv(pnl: PnL): string {
   rows.push(csvRow(["Summary"]));
   rows.push(csvRow(["Revenue — shop orders", pnl.revenue.shopEgp]));
   rows.push(csvRow(["Revenue — treatments (confirmed bookings)", pnl.revenue.treatmentsEgp]));
+  if (pnl.revenue.unmatchedBookings > 0) {
+    rows.push(
+      csvRow([
+        "Unmatched bookings (no catalogue price — excluded)",
+        pnl.revenue.unmatchedBookings,
+      ])
+    );
+  }
   rows.push(csvRow(["Revenue — manual income", pnl.revenue.manualIncomeEgp]));
   rows.push(csvRow(["Revenue — TOTAL", pnl.revenue.totalEgp]));
   rows.push("");
