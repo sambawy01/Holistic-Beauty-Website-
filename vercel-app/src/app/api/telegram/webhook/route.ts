@@ -3,11 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   answerCallbackQuery,
   confirmCancelKeyboard,
+  downloadFile,
   editMessageText,
+  getFile,
   sendMessage,
   telegramConfigured,
 } from "@/lib/telegram";
 import { runAgent } from "@/lib/assistant/agent";
+import {
+  MAX_VOICE_BYTES,
+  MAX_VOICE_SECONDS,
+  transcribeVoice,
+  voiceEnabled,
+} from "@/lib/assistant/voice";
+import { analyzePhoto, visionEnabled } from "@/lib/assistant/vision";
 import { executeTool } from "@/lib/assistant/tools";
 import {
   appendAudit,
@@ -111,11 +120,30 @@ interface TgUser {
   last_name?: string;
 }
 
+/** A Telegram voice note (OGG/Opus). */
+interface TgVoice {
+  file_id: string;
+  duration?: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
+/** One size of a Telegram photo (the `photo` array holds several). */
+interface TgPhotoSize {
+  file_id: string;
+  width?: number;
+  height?: number;
+  file_size?: number;
+}
+
 interface TgMessage {
   message_id: number;
   chat: TgChat;
   from?: TgUser;
   text?: string;
+  caption?: string;
+  voice?: TgVoice;
+  photo?: TgPhotoSize[];
 }
 
 interface TgCallbackQuery {
@@ -223,6 +251,171 @@ async function alertOwnerOfIntrusion(
 const OWNER_READ_ERROR =
   "Sorry — something went wrong on my side. Please try again in a minute.";
 
+/**
+ * Run one instruction through the agent loop and send the reply (parking
+ * behind the [Confirm | Cancel] keyboard when the agent returns a mutation).
+ * Shared by the typed-text, transcribed-voice and photo (two-stage) paths so
+ * all three feed the SAME loop and the SAME confirm gate.
+ */
+async function runAgentAndReply(
+  chatId: number,
+  text: string,
+  deadlineAt: number
+): Promise<void> {
+  const outcome = await runAgent(text, { chatId }, { deadlineAt });
+  if (outcome.kind === "confirm") {
+    await sendMessage(chatId, outcome.text, {
+      replyMarkup: confirmCancelKeyboard(outcome.pendingId),
+    });
+  } else {
+    await sendMessage(chatId, outcome.text);
+  }
+}
+
+/**
+ * Voice note → transcript (Groq Whisper) → same agent loop as typed text.
+ * Owner-only (the caller runs the owner gate first). Best effort: every
+ * failure path replies with a friendly message, never crashes the webhook.
+ */
+async function handleVoice(
+  chatId: number,
+  voice: TgVoice,
+  deadlineAt: number
+): Promise<void> {
+  if (!voiceEnabled()) {
+    await sendMessage(
+      chatId,
+      "I can't transcribe voice notes right now (transcription isn't configured) — please type it and I'll help."
+    );
+    return;
+  }
+  // Duration cap (Telegram reports it) — reject very long notes up front.
+  if (typeof voice.duration === "number" && voice.duration > MAX_VOICE_SECONDS) {
+    await sendMessage(
+      chatId,
+      `That voice note is quite long (${Math.round(voice.duration / 60)} min) — I can transcribe up to ${MAX_VOICE_SECONDS / 60} minutes. Could you send a shorter one, or type it?`
+    );
+    return;
+  }
+  if (typeof voice.file_size === "number" && voice.file_size > MAX_VOICE_BYTES) {
+    await sendMessage(
+      chatId,
+      "That voice note is too large for me to transcribe — please send a shorter one or type it."
+    );
+    return;
+  }
+
+  let bytes: Buffer;
+  try {
+    const file = await getFile(voice.file_id);
+    if (!file.ok || !file.filePath) {
+      await sendMessage(
+        chatId,
+        "I couldn't fetch that voice note from Telegram — please try sending it again."
+      );
+      return;
+    }
+    bytes = await downloadFile(file.filePath, { maxBytes: MAX_VOICE_BYTES });
+  } catch (error) {
+    console.error("[telegram] Voice download failed:", error);
+    await sendMessage(
+      chatId,
+      "I couldn't catch that voice note (download failed) — please try again or type it."
+    );
+    return;
+  }
+
+  const transcript = await transcribeVoice(bytes, {
+    mime: voice.mime_type,
+    filename: "voice.ogg",
+  });
+  if (!transcript.ok) {
+    const msg =
+      transcript.reason === "too-large"
+        ? "That voice note is too large for me to transcribe — please send a shorter one or type it."
+        : "Sorry, I couldn't catch that — the audio didn't come through clearly. Could you try again or type it?";
+    await sendMessage(chatId, msg);
+    return;
+  }
+
+  // Echo what was understood BEFORE acting, so Victoria can catch a misread.
+  await sendMessage(chatId, `🎙 Heard: ${transcript.text}`);
+  await runAgentAndReply(chatId, transcript.text, deadlineAt);
+}
+
+/** Largest photo size in the `photo` array (Telegram sorts ascending). */
+function largestPhoto(photos: TgPhotoSize[]): TgPhotoSize | null {
+  let best: TgPhotoSize | null = null;
+  for (const p of photos) {
+    if (!p?.file_id) continue;
+    if (
+      !best ||
+      (p.file_size ?? 0) > (best.file_size ?? 0) ||
+      (p.width ?? 0) * (p.height ?? 0) > (best.width ?? 0) * (best.height ?? 0)
+    ) {
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
+ * Photo → two-stage vision flow. Stage 1 (vision.ts) extracts structured data
+ * and enforces the skin-assessment guardrail; stage 2 (here) feeds a synthesized
+ * instruction through the SAME agent loop + confirm gate for receipt/product.
+ * Owner-only; best effort (never crashes the webhook).
+ */
+async function handlePhoto(
+  chatId: number,
+  photos: TgPhotoSize[],
+  caption: string,
+  deadlineAt: number
+): Promise<void> {
+  if (!visionEnabled()) {
+    await sendMessage(
+      chatId,
+      "I can't look at photos right now (vision isn't configured) — tell me the details as text and I'll help."
+    );
+    return;
+  }
+  const pick = largestPhoto(photos);
+  if (!pick) {
+    await sendMessage(chatId, "I couldn't read that photo — please try again.");
+    return;
+  }
+
+  let bytes: Buffer;
+  try {
+    const file = await getFile(pick.file_id);
+    if (!file.ok || !file.filePath) {
+      await sendMessage(
+        chatId,
+        "I couldn't fetch that photo from Telegram — please try sending it again."
+      );
+      return;
+    }
+    // 15 MB cap — Telegram photo sizes are small; this guards garbage uploads.
+    bytes = await downloadFile(file.filePath, { maxBytes: 15 * 1024 * 1024 });
+  } catch (error) {
+    console.error("[telegram] Photo download failed:", error);
+    await sendMessage(
+      chatId,
+      "I couldn't open that photo (download failed) — please try again."
+    );
+    return;
+  }
+
+  const outcome = await analyzePhoto(bytes, caption, { deadlineAt });
+  if (outcome.kind === "reply") {
+    await sendMessage(chatId, outcome.text);
+    return;
+  }
+  // Two-stage: show what was understood, then run the instruction through the
+  // agent so the mutation parks behind Victoria's confirm tap.
+  await sendMessage(chatId, outcome.echo);
+  await runAgentAndReply(chatId, outcome.instruction, deadlineAt);
+}
+
 async function handleMessage(
   message: TgMessage,
   deadlineAt: number
@@ -321,22 +514,32 @@ async function handleMessage(
     return;
   }
 
-  if (!text) {
-    await sendMessage(
+  // Voice note → transcribe → agent loop (owner gate already passed above).
+  if (message.voice) {
+    await handleVoice(chatId, message.voice, deadlineAt);
+    return;
+  }
+
+  // Photo → two-stage vision flow (skin-assessment guardrail inside).
+  if (message.photo && message.photo.length > 0) {
+    await handlePhoto(
       chatId,
-      "I only read text for now — voice notes and photos go over my head. 🙈"
+      message.photo,
+      (message.caption ?? "").trim(),
+      deadlineAt
     );
     return;
   }
 
-  const outcome = await runAgent(text, { chatId }, { deadlineAt });
-  if (outcome.kind === "confirm") {
-    await sendMessage(chatId, outcome.text, {
-      replyMarkup: confirmCancelKeyboard(outcome.pendingId),
-    });
-  } else {
-    await sendMessage(chatId, outcome.text);
+  if (!text) {
+    await sendMessage(
+      chatId,
+      "I can read text, voice notes and photos — but that one I couldn't make sense of. 🙈"
+    );
+    return;
   }
+
+  await runAgentAndReply(chatId, text, deadlineAt);
 }
 
 // --- callback (confirm / cancel buttons) -----------------------------------------------
