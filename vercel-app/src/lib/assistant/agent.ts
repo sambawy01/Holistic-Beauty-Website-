@@ -13,6 +13,10 @@ import {
   createPendingAction,
   loadHistory,
 } from "./state";
+import {
+  createWebFetchAllowlist,
+  WEB_TOOL_TIMEOUT_MS,
+} from "./ollama-search";
 
 /**
  * Vassili's agent loop — Ollama chat with NATIVE tool calling.
@@ -238,6 +242,14 @@ export async function runAgent(
   // to fast instead of re-attempting (and re-failing) the heavy model.
   let heavyDisabled = false;
 
+  // Fresh per-run web_fetch allowlist: web_search records its result URLs into
+  // it; web_fetch is restricted to those exact URLs (anti-exfiltration). A new
+  // run gets a new allowlist, so URLs from other runs are never fetchable.
+  const runCtx: ToolContext = {
+    ...ctx,
+    webFetchAllowlist: createWebFetchAllowlist(),
+  };
+
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const finalRound = round === MAX_TOOL_ROUNDS;
 
@@ -405,7 +417,23 @@ export async function runAgent(
     for (const call of toolCalls) {
       const name = call.function?.name ?? "";
       const args = parseArgs(call);
-      const result = await executeTool(name, args, ctx);
+      // Deadline gate for the web tools: each carries a ~8s upstream timeout
+      // and read-only tools run with no per-tool budget check, so two of them
+      // could push past the function's maxDuration kill (→ Telegram redelivers
+      // and double-runs the agent). If less than one web-tool timeout remains,
+      // skip the call with a "ran out of time" result instead of risking it.
+      const isWebTool = name === "web_search" || name === "web_fetch";
+      let result: string;
+      if (
+        isWebTool &&
+        opts.deadlineAt !== undefined &&
+        opts.deadlineAt - Date.now() < WEB_TOOL_TIMEOUT_MS
+      ) {
+        result =
+          "Ran out of time to look that up just now — please ask me again in a moment.";
+      } else {
+        result = await executeTool(name, args, runCtx);
+      }
       await appendAudit({
         chatId: ctx.chatId,
         kind: "tool-executed",
