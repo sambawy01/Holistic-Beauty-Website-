@@ -43,6 +43,92 @@ const NUM_PREDICT = 700;
 const DEADLINE_MIN_MODEL_MS = 20_000;
 /** Time reserved after the last model call to send the Telegram reply. */
 const REPLY_RESERVE_MS = 8_000;
+/**
+ * Below this much remaining budget we DOWNGRADE a heavy-routed call to the
+ * fast model: heavy models can run slower, and a request must never be lost to
+ * routing. Empirically the chosen heavy model (deepseek-v4-pro:cloud) returns
+ * in ~2–3s, well under this, but the worst-case sibling (kimi-k2.6) has spiked
+ * to ~10s — so leave generous headroom before the deadline.
+ */
+const HEAVY_MIN_REMAINING_MS = 35_000;
+
+// --- Model routing -----------------------------------------------------------
+//
+// Two models, picked per task (see pickModel):
+// - FAST (deepseek-v4-flash:cloud): default for everyday ops — bookings,
+//   orders, quick Q&A. Keeps Telegram latency low.
+// - HEAVY (deepseek-v4-pro:cloud): document / long-form generation — when the
+//   user asks to write/draft/compose a letter, offer, proposal or document, or
+//   the run is about to produce one (document_create / finance_pnl_document /
+//   draft_client_email). Chosen empirically over kimi-k2.6 / glm-5.1: across
+//   repeated probes deepseek-v4-pro ALWAYS emitted a well-formed tool_call with
+//   every REQUIRED argument present (kimi-k2.6 dropped a required arg and had
+//   ~10s latency spikes), returned in ~2.2s consistently, and — being the
+//   heavyweight sibling of the fast default — keeps the persona/formatting the
+//   existing prompt is tuned for. Tool-calling support is REQUIRED and proven.
+//
+// Both are env-overridable. Routing FAILS SAFE: if the heavy call errors (e.g.
+// the model isn't pulled on this host) the loop retries once on the fast model
+// rather than failing the request (see runAgent).
+
+export const FAST_MODEL_DEFAULT = "deepseek-v4-flash:cloud";
+export const HEAVY_MODEL_DEFAULT = "deepseek-v4-pro:cloud";
+
+/** The everyday fast model (OLLAMA_MODEL override, else the flash default). */
+export function fastModel(): string {
+  return process.env.OLLAMA_MODEL || FAST_MODEL_DEFAULT;
+}
+/** The heavyweight model for long-form generation (OLLAMA_MODEL_HEAVY). */
+export function heavyModel(): string {
+  return process.env.OLLAMA_MODEL_HEAVY || HEAVY_MODEL_DEFAULT;
+}
+
+// Generation verbs + document nouns. Heavy routing fires when the user is
+// asking the assistant to AUTHOR a document/long-form piece — not when they
+// dictate content for an ops action (e.g. "send an email with exactly this
+// body: …" has no generation verb, so it stays fast).
+const GEN_VERB_RE =
+  /\b(write|draft|compose|prepare|prep|produce|generate|create|make|put together|drafting|compose)\b/i;
+const DOC_NOUN_RE =
+  /\b(letter|offer|proposal|document|doc|pdf|memo|contract|agreement|statement|p&l|p&amp;l|profit\s*(?:&|and)\s*loss|invoice|quote|quotation|cover\s*note|email)\b/i;
+const RU_GEN_VERB_RE =
+  /(напиш|состав|подготов|оформ|сделай|сгенерир|подготовь|сочини)/i;
+const RU_DOC_NOUN_RE =
+  /(письм|предложени|документ|оффер|договор|памятк|счёт|счет|pdf|коммерческ)/i;
+// Phrases that are document-generation on their own.
+const HEAVY_PHRASE_RE =
+  /(коммерческ\w*\s+предложени|offer\s+document|offer\s+letter|p&l\s+(?:document|statement|pdf)|letterhead)/i;
+
+/** Does this user message ask the assistant to author a document / long-form? */
+export function isHeavyIntent(userText: string): boolean {
+  const t = (userText || "").slice(0, 2000);
+  if (HEAVY_PHRASE_RE.test(t)) return true;
+  if (GEN_VERB_RE.test(t) && DOC_NOUN_RE.test(t)) return true;
+  if (RU_GEN_VERB_RE.test(t) && RU_DOC_NOUN_RE.test(t)) return true;
+  return false;
+}
+
+export interface ModelRoute {
+  model: string;
+  heavy: boolean;
+  reason: string;
+}
+
+/**
+ * Pick the model for a run from the user's message. Pure + env-overridable so
+ * it can be unit-tested in isolation. Document/long-form intent → heavy; every
+ * other (ops) request → fast.
+ */
+export function pickModel(ctx: { userText: string }): ModelRoute {
+  if (isHeavyIntent(ctx.userText)) {
+    return {
+      model: heavyModel(),
+      heavy: true,
+      reason: "document/long-form generation intent",
+    };
+  }
+  return { model: fastModel(), heavy: false, reason: "default ops" };
+}
 
 interface OllamaToolCall {
   function: { name: string; arguments?: Record<string, unknown> | string };
@@ -57,13 +143,13 @@ interface OllamaChatMessage {
 
 async function callOllama(
   messages: OllamaChatMessage[],
+  model: string,
   timeoutMs: number = UPSTREAM_TIMEOUT_MS
 ): Promise<OllamaChatMessage> {
   const apiKey = process.env.OLLAMA_API_KEY;
   const baseUrl = apiKey
     ? "https://ollama.com/api/chat"
     : "http://localhost:11434/api/chat";
-  const model = process.env.OLLAMA_MODEL || "deepseek-v4-flash:cloud";
 
   const res = await fetch(baseUrl, {
     method: "POST",
@@ -143,6 +229,15 @@ export async function runAgent(
   // happened instead of a generic empty-handed shrug.
   let lastRefusal: string | null = null;
 
+  // Route once from the user's intent; the whole run uses this model so the
+  // call that AUTHORS a document (emitting document_create / draft / P&L args)
+  // is the heavy one. Per-call we may still downgrade to fast if the deadline
+  // is tight, and fall back to fast if the heavy call errors.
+  const route = pickModel({ userText });
+  // Latched once the heavy model fails in this run, so later rounds go straight
+  // to fast instead of re-attempting (and re-failing) the heavy model.
+  let heavyDisabled = false;
+
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const finalRound = round === MAX_TOOL_ROUNDS;
 
@@ -163,18 +258,58 @@ export async function runAgent(
       return { kind: "text", text };
     }
 
+    // Budget-aware model choice for THIS call: heavy only when there is room
+    // for its (potentially slower) response and it hasn't already failed this
+    // run; otherwise fall to fast.
+    const useHeavy =
+      route.heavy && !heavyDisabled && remainingMs >= HEAVY_MIN_REMAINING_MS;
+    const callModel = useHeavy ? route.model : fastModel();
+    const callTimeout = Math.min(
+      UPSTREAM_TIMEOUT_MS,
+      remainingMs - REPLY_RESERVE_MS
+    );
+
     let reply: OllamaChatMessage;
     try {
-      reply = await callOllama(
-        messages,
-        Math.min(UPSTREAM_TIMEOUT_MS, remainingMs - REPLY_RESERVE_MS)
-      );
+      reply = await callOllama(messages, callModel, callTimeout);
     } catch (error) {
-      console.error("[assistant] Model call failed:", error);
-      return {
-        kind: "text",
-        text: "Sorry — my brain is unreachable right now. Please try again in a minute.",
-      };
+      console.error(
+        `[assistant] Model call failed (model=${callModel}):`,
+        error
+      );
+      // FAIL SAFE: never lose a request to routing. If the HEAVY model failed
+      // (e.g. not pulled on this host, or upstream hiccup), retry once on the
+      // fast model — but only if budget still allows a fresh call. Latch heavy
+      // off so the remaining rounds skip it.
+      heavyDisabled = true;
+      const fast = fastModel();
+      const retryRemaining =
+        opts.deadlineAt !== undefined
+          ? opts.deadlineAt - Date.now()
+          : Number.POSITIVE_INFINITY;
+      if (callModel !== fast && retryRemaining >= DEADLINE_MIN_MODEL_MS) {
+        try {
+          reply = await callOllama(
+            messages,
+            fast,
+            Math.min(UPSTREAM_TIMEOUT_MS, retryRemaining - REPLY_RESERVE_MS)
+          );
+        } catch (fallbackError) {
+          console.error(
+            "[assistant] Fast-model fallback also failed:",
+            fallbackError
+          );
+          return {
+            kind: "text",
+            text: "Sorry — my brain is unreachable right now. Please try again in a minute.",
+          };
+        }
+      } else {
+        return {
+          kind: "text",
+          text: "Sorry — my brain is unreachable right now. Please try again in a minute.",
+        };
+      }
     }
 
     const toolCalls = reply.tool_calls ?? [];
