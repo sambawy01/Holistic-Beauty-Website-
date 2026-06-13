@@ -20,6 +20,44 @@ const API_BASE = "https://api.telegram.org";
 /** Telegram hard limit on message text length. */
 const MAX_MESSAGE_CHARS = 4096;
 
+// --- deadline-aware I/O budgeting ---------------------------------------------
+//
+// The webhook has a hard maxDuration (90s) — if processing overruns, Vercel
+// SIGKILLs the invocation, it answers no 2xx, and Telegram REDELIVERS the
+// update (re-spending tokens / re-running the flow). File fetch + transcription
+// must therefore never consume the budget the agent loop needs afterwards.
+// Callers thread the webhook's `deadlineAt`; each I/O call caps its timeout at
+// min(its own budget, remaining − reserve) and fails fast (IoDeadlineError)
+// when too little time is left, so we surface a friendly "took too long" reply
+// instead of risking the kill → redelivery.
+
+/** Budget reserved for the agent loop after a file fetch (ms). */
+export const IO_DEADLINE_RESERVE_MS = 20_000;
+/** Don't start an I/O call with less than this much time; fail fast instead. */
+const MIN_IO_TIMEOUT_MS = 3_000;
+
+/** Raised when too little of the webhook budget remains to start an I/O call. */
+export class IoDeadlineError extends Error {
+  constructor() {
+    super("insufficient time budget before the webhook deadline");
+    this.name = "IoDeadlineError";
+  }
+}
+
+/**
+ * Effective timeout (ms) for one deadline-bounded I/O call: the smaller of
+ * `base` and the budget left before `deadlineAt` minus the agent-loop reserve.
+ * Throws IoDeadlineError when the remaining budget is already too low — the
+ * caller catches it and replies "that took too long" rather than risking the
+ * maxDuration kill (→ Telegram redelivery). With no deadline, returns `base`.
+ */
+function deadlineBoundedTimeout(base: number, deadlineAt?: number): number {
+  if (deadlineAt === undefined) return base;
+  const budget = deadlineAt - Date.now() - IO_DEADLINE_RESERVE_MS;
+  if (budget < MIN_IO_TIMEOUT_MS) throw new IoDeadlineError();
+  return Math.min(base, budget);
+}
+
 export function telegramConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN);
 }
@@ -42,13 +80,14 @@ export interface TelegramResult {
 
 async function callTelegram(
   method: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  timeoutMs = 15_000
 ): Promise<TelegramResult> {
   const res = await fetch(botUrl(method), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
@@ -158,8 +197,13 @@ export interface ResolvedFile {
   fileSize?: number;
 }
 
-export async function getFile(fileId: string): Promise<ResolvedFile> {
-  const r = await callTelegram("getFile", { file_id: fileId });
+export async function getFile(
+  fileId: string,
+  options: { deadlineAt?: number } = {}
+): Promise<ResolvedFile> {
+  // Throws IoDeadlineError when too little budget remains (caller fails fast).
+  const timeoutMs = deadlineBoundedTimeout(15_000, options.deadlineAt);
+  const r = await callTelegram("getFile", { file_id: fileId }, timeoutMs);
   if (!r.ok) return { ok: false };
   const res = r.result as
     | { file_path?: string; file_size?: number }
@@ -182,13 +226,19 @@ export async function getFile(fileId: string): Promise<ResolvedFile> {
  */
 export async function downloadFile(
   filePath: string,
-  options: { maxBytes?: number; timeoutMs?: number } = {}
+  options: { maxBytes?: number; timeoutMs?: number; deadlineAt?: number } = {}
 ): Promise<Buffer> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   const url = `${API_BASE}/file/bot${token}/${filePath}`;
+  // Cap at min(its own timeout, remaining budget − reserve); throws
+  // IoDeadlineError when too little time is left (caller fails fast).
+  const timeoutMs = deadlineBoundedTimeout(
+    options.timeoutMs ?? 30_000,
+    options.deadlineAt
+  );
   const res = await fetch(url, {
-    signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     throw new Error(`downloadFile failed (${res.status})`);

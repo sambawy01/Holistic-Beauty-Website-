@@ -42,6 +42,16 @@ export const MAX_VOICE_SECONDS = 300;
 /** Per-request upstream timeout for the Groq call. */
 const TRANSCRIBE_TIMEOUT_MS = 30_000;
 
+/**
+ * Budget reserved for the agent loop AFTER transcription (ms). Transcription is
+ * the last I/O before the agent runs, so we never let the Groq call extend past
+ * `deadlineAt − this`, and fail fast below this floor — a SIGKILL at the
+ * webhook's maxDuration would answer no 2xx and make Telegram redeliver.
+ */
+const TRANSCRIBE_DEADLINE_RESERVE_MS = 20_000;
+/** Don't start the Groq call with less than this much time; fail fast instead. */
+const MIN_TRANSCRIBE_TIMEOUT_MS = 3_000;
+
 /** Is voice transcription usable right now? (Needs a Groq API key.) */
 export function voiceEnabled(): boolean {
   return Boolean((process.env.GROQ_API_KEY || "").trim());
@@ -49,7 +59,10 @@ export function voiceEnabled(): boolean {
 
 export type TranscriptionOutcome =
   | { ok: true; text: string }
-  | { ok: false; reason: "disabled" | "too-large" | "empty" | "upstream" };
+  | {
+      ok: false;
+      reason: "disabled" | "too-large" | "empty" | "upstream" | "too-slow";
+    };
 
 /**
  * Transcribe voice-note bytes to text via Groq Whisper. Never throws — every
@@ -58,12 +71,23 @@ export type TranscriptionOutcome =
  */
 export async function transcribeVoice(
   bytes: Buffer,
-  options: { mime?: string; filename?: string } = {}
+  options: { mime?: string; filename?: string; deadlineAt?: number } = {}
 ): Promise<TranscriptionOutcome> {
   const key = (process.env.GROQ_API_KEY || "").trim();
   if (!key) return { ok: false, reason: "disabled" };
   if (bytes.length === 0 || bytes.length > MAX_VOICE_BYTES) {
     return { ok: false, reason: "too-large" };
+  }
+
+  // Deadline-aware timeout: cap at min(default, remaining − reserve). If too
+  // little of the webhook budget remains, fail fast ("too-slow") rather than
+  // risk the maxDuration kill → Telegram redelivery.
+  let timeoutMs = TRANSCRIBE_TIMEOUT_MS;
+  if (options.deadlineAt !== undefined) {
+    const budget =
+      options.deadlineAt - Date.now() - TRANSCRIBE_DEADLINE_RESERVE_MS;
+    if (budget < MIN_TRANSCRIBE_TIMEOUT_MS) return { ok: false, reason: "too-slow" };
+    timeoutMs = Math.min(TRANSCRIBE_TIMEOUT_MS, budget);
   }
 
   const form = new FormData();
@@ -85,7 +109,7 @@ export async function transcribeVoice(
       method: "POST",
       headers: { Authorization: `Bearer ${key}` },
       body: form,
-      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       const detail = (await res.text().catch(() => "")).slice(0, 300);

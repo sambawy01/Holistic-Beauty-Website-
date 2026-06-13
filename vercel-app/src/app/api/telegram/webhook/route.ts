@@ -6,6 +6,7 @@ import {
   downloadFile,
   editMessageText,
   getFile,
+  IoDeadlineError,
   sendMessage,
   telegramConfigured,
 } from "@/lib/telegram";
@@ -75,6 +76,17 @@ export const maxDuration = 90;
  * mid-run — a killed invocation answers no 2xx and Telegram redelivers.
  */
 const DEADLINE_MARGIN_MS = 10_000;
+
+/**
+ * Preventive cap on a Telegram photo (bytes). Telegram-compressed photos are
+ * small; this rejects an oversized one from its REPORTED file_size BEFORE we
+ * download (downloadFile's content-length/body check is the backstop).
+ */
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+
+/** Friendly reply when file I/O ran out of budget before the webhook deadline. */
+const IO_TOO_SLOW =
+  "Sorry — that took too long to fetch and I ran low on time. Please try sending it again.";
 
 // --- update_id dedupe (best effort, in-memory) ---------------------------------
 // Telegram redelivers an update whenever it saw no 2xx (e.g. a timed-out
@@ -307,7 +319,7 @@ async function handleVoice(
 
   let bytes: Buffer;
   try {
-    const file = await getFile(voice.file_id);
+    const file = await getFile(voice.file_id, { deadlineAt });
     if (!file.ok || !file.filePath) {
       await sendMessage(
         chatId,
@@ -315,8 +327,17 @@ async function handleVoice(
       );
       return;
     }
-    bytes = await downloadFile(file.filePath, { maxBytes: MAX_VOICE_BYTES });
+    bytes = await downloadFile(file.filePath, {
+      maxBytes: MAX_VOICE_BYTES,
+      deadlineAt,
+    });
   } catch (error) {
+    // Out of time budget → fail fast with a friendly retry, not a slow death
+    // that would SIGKILL the invocation and make Telegram redeliver.
+    if (error instanceof IoDeadlineError) {
+      await sendMessage(chatId, IO_TOO_SLOW);
+      return;
+    }
     console.error("[telegram] Voice download failed:", error);
     await sendMessage(
       chatId,
@@ -328,12 +349,15 @@ async function handleVoice(
   const transcript = await transcribeVoice(bytes, {
     mime: voice.mime_type,
     filename: "voice.ogg",
+    deadlineAt,
   });
   if (!transcript.ok) {
     const msg =
-      transcript.reason === "too-large"
-        ? "That voice note is too large for me to transcribe — please send a shorter one or type it."
-        : "Sorry, I couldn't catch that — the audio didn't come through clearly. Could you try again or type it?";
+      transcript.reason === "too-slow"
+        ? IO_TOO_SLOW
+        : transcript.reason === "too-large"
+          ? "That voice note is too large for me to transcribe — please send a shorter one or type it."
+          : "Sorry, I couldn't catch that — the audio didn't come through clearly. Could you try again or type it?";
     await sendMessage(chatId, msg);
     return;
   }
@@ -384,9 +408,19 @@ async function handlePhoto(
     return;
   }
 
+  // Preventive size cap from Telegram's REPORTED file_size — reject an
+  // oversized photo BEFORE downloading (downloadFile's check is the backstop).
+  if (typeof pick.file_size === "number" && pick.file_size > MAX_PHOTO_BYTES) {
+    await sendMessage(
+      chatId,
+      "That photo is too large for me to process — please send a smaller or more compressed version."
+    );
+    return;
+  }
+
   let bytes: Buffer;
   try {
-    const file = await getFile(pick.file_id);
+    const file = await getFile(pick.file_id, { deadlineAt });
     if (!file.ok || !file.filePath) {
       await sendMessage(
         chatId,
@@ -395,8 +429,16 @@ async function handlePhoto(
       return;
     }
     // 15 MB cap — Telegram photo sizes are small; this guards garbage uploads.
-    bytes = await downloadFile(file.filePath, { maxBytes: 15 * 1024 * 1024 });
+    bytes = await downloadFile(file.filePath, {
+      maxBytes: MAX_PHOTO_BYTES,
+      deadlineAt,
+    });
   } catch (error) {
+    // Out of time budget → fail fast (avoids the SIGKILL → redelivery path).
+    if (error instanceof IoDeadlineError) {
+      await sendMessage(chatId, IO_TOO_SLOW);
+      return;
+    }
     console.error("[telegram] Photo download failed:", error);
     await sendMessage(
       chatId,
