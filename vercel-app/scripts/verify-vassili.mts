@@ -2554,6 +2554,25 @@ try {
         fc.slice(0, 160)
       );
 
+      // (c2) HARDENING: web_fetch fetches the EXACT canonical surfaced-URL
+      // string, never the model's string. allows() returns that canonical; when
+      // the model appends a #fragment to an allowlisted URL the fragment is
+      // dropped (the surfaced bytes are what reach the fetch layer). This closes
+      // the fragment pass-through / WHATWG-vs-Go parser-differential surface.
+      const exactCanon = runCtx.webFetchAllowlist.allows(surfaced);
+      check(
+        "(c2) allows() returns the exact surfaced URL for a byte-identical fetch",
+        exactCanon === surfaced,
+        `surfaced=${surfaced.slice(0, 80)} canon=${String(exactCanon).slice(0, 80)}`
+      );
+      const fragged = `${surfaced}#leak-${"x".repeat(8)}`;
+      const fragCanon = runCtx.webFetchAllowlist.allows(fragged);
+      check(
+        "(c2) model-appended #fragment is dropped — canonical surfaced URL is fetched",
+        fragCanon === surfaced && !String(fragCanon).includes("#"),
+        `fragged=${fragged.slice(0, 90)} canon=${String(fragCanon).slice(0, 90)}`
+      );
+
       // (d) cross-run isolation: the surfaced URL is NOT fetchable from a
       // DIFFERENT run's allowlist.
       const otherRunCtx = {

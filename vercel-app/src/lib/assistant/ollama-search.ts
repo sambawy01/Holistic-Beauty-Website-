@@ -222,9 +222,15 @@ export interface WebFetchAllowlist {
   record(url: string): void;
   /** Record every URL in a batch of search results. */
   recordAll(urls: Iterable<string>): void;
-  /** May web_fetch open this URL? (origin+path must match a recorded result;
-   *  query must be empty or exactly one a search surfaced.) */
-  allows(url: string): boolean;
+  /**
+   * May web_fetch open this URL? (origin+path must match a recorded result;
+   * query must be empty or exactly one a search surfaced.) Returns the EXACT
+   * canonical surfaced-URL string that matched — the caller MUST fetch that
+   * string, not the model-supplied one, so a model-appended fragment or any
+   * WHATWG-vs-Go parser-differential surface is dropped. Returns null if the
+   * URL is not allowed.
+   */
+  allows(url: string): string | null;
   /** How many distinct origin+path keys are recorded (diagnostics/tests). */
   size(): number;
 }
@@ -259,28 +265,36 @@ function allowlistKey(rawUrl: string): { key: string; search: string } | null {
  * so URLs from a different run are never fetchable (cross-run isolation).
  */
 export function createWebFetchAllowlist(): WebFetchAllowlist {
-  // origin+pathname → set of exact query strings (including "") search surfaced.
-  const allowed = new Map<string, Set<string>>();
+  // origin+pathname → (exact query string, including "") → the EXACT canonical
+  // surfaced-URL string search reported for that origin+path+query. We hand the
+  // canonical string back from allows() so the caller fetches the bytes search
+  // surfaced, never the model's string (drops appended fragments / parser-diffs).
+  const allowed = new Map<string, Map<string, string>>();
   return {
     record(url: string) {
-      const parsed = allowlistKey(url);
+      const surfaced = (url || "").trim();
+      const parsed = allowlistKey(surfaced);
       if (!parsed) return;
-      const set = allowed.get(parsed.key) ?? new Set<string>();
-      set.add(parsed.search);
-      allowed.set(parsed.key, set);
+      const byQuery = allowed.get(parsed.key) ?? new Map<string, string>();
+      // Keep the first surfaced spelling for a given key+query (deterministic).
+      if (!byQuery.has(parsed.search)) byQuery.set(parsed.search, surfaced);
+      allowed.set(parsed.key, byQuery);
     },
     recordAll(urls: Iterable<string>) {
       for (const u of urls) this.record(u);
     },
-    allows(url: string): boolean {
+    allows(url: string): string | null {
       const parsed = allowlistKey(url);
-      if (!parsed) return false;
-      const queries = allowed.get(parsed.key);
-      if (!queries) return false;
-      // No query is always safe (carries no data); otherwise the query must be
-      // exactly one search surfaced for this origin+path.
-      if (parsed.search === "") return true;
-      return queries.has(parsed.search);
+      if (!parsed) return null;
+      const byQuery = allowed.get(parsed.key);
+      if (!byQuery) return null;
+      // No query is always safe (carries no model-supplied data): fetch the
+      // exact bare surfaced URL if search reported one, else the canonical bare
+      // form of the key (origin+path, no query, no fragment).
+      if (parsed.search === "") return byQuery.get("") ?? parsed.key;
+      // Otherwise the query must be byte-identical to one a search surfaced for
+      // this origin+path; fetch the exact canonical string that matched.
+      return byQuery.get(parsed.search) ?? null;
     },
     size() {
       return allowed.size;
