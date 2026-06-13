@@ -79,12 +79,27 @@ let scriptedOllama: { message: Record<string, unknown> }[] | null = null;
 const ollamaRequests: {
   messages: { role: string; tool_name?: string; content: string }[];
 }[] = [];
+/**
+ * Every model named on an /api/chat call (scripted OR real pass-through), in
+ * order — lets the routing sections (A) assert which model each request used.
+ */
+const ollamaModelsSeen: string[] = [];
 
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url =
     typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? "GET").toUpperCase();
+
+  // Record the model on EVERY chat call (scripted or real) for routing checks.
+  if (url.includes("/api/chat") && typeof init?.body === "string") {
+    try {
+      const parsed = JSON.parse(init.body) as { model?: unknown };
+      if (typeof parsed.model === "string") ollamaModelsSeen.push(parsed.model);
+    } catch {
+      // not JSON — ignore
+    }
+  }
 
   if (url.includes("api.telegram.org")) {
     const cap: Captured = { url, method };
@@ -225,8 +240,18 @@ const {
 } = await import("../src/lib/assistant/state");
 const { claimDailySend } = await import("../src/lib/reports/shared");
 const { getCatalog, saveCatalog } = await import("../src/lib/catalog");
-const { executeTool, describeMutation, validateMutationArgs } = await import(
-  "../src/lib/assistant/tools"
+const { executeTool, describeMutation, validateMutationArgs, TOOLS } =
+  await import("../src/lib/assistant/tools");
+const {
+  pickModel,
+  isHeavyIntent,
+  fastModel,
+  heavyModel,
+  HEAVY_MODEL_DEFAULT,
+} = await import("../src/lib/assistant/agent");
+const { buildVassiliSystemPrompt } = await import("../src/lib/assistant/prompt");
+const { webSearchEnabled, WEB_SEARCH_DISABLED_MESSAGE } = await import(
+  "../src/lib/assistant/ollama-search"
 );
 const { listOrders, getOrder } = await import("../src/lib/orders");
 const { listOutOfOffice, deleteOutOfOffice, listOwnerBookings } = await import(
@@ -2320,6 +2345,194 @@ try {
       "forced runs never claim the real weekly marker (untouched, claimed or not)",
       (await readBlobText(realMarkerPath)) === realMarkerBefore
     );
+  }
+
+  // ====================================================================================
+  console.log("\n=== 21. Model routing: pickModel() unit tests ===");
+  {
+    const heavyIntents = [
+      "draft an offer letter to Palm Hills Spa",
+      "make me an offer document for Palm Hills",
+      "write a thank-you letter to a returning client",
+      "compose a cover note for the new supplier",
+      "generate a P&L statement PDF for this month",
+      "draft an email to Mariam thanking her for visiting",
+      "сделай PDF-документ: коммерческое предложение для спа-отеля",
+      "напиши письмо клиенту с благодарностью",
+    ];
+    const opsIntents = [
+      "what's my day looking like?",
+      "set tohar quantity to 15",
+      "confirm hany's pending booking",
+      "give me the stats summary for this month",
+      'send an email to partner@example.com with subject "Samples" and exactly this body: "Hello"',
+      "block my calendar for 5 March 2027",
+      "list today's appointments",
+      "add a new product to the shop",
+    ];
+    const heavyMisses = heavyIntents.filter((t) => !pickModel({ userText: t }).heavy);
+    const opsMisses = opsIntents.filter((t) => pickModel({ userText: t }).heavy);
+    check(
+      "pickModel: document/long-form intents → heavy",
+      heavyMisses.length === 0,
+      heavyMisses.join(" | ") || "all heavy"
+    );
+    check(
+      "pickModel: ops intents → fast (no false heavy routing)",
+      opsMisses.length === 0,
+      opsMisses.join(" | ") || "all fast"
+    );
+    check(
+      "pickModel: heavy route names the heavy model",
+      pickModel({ userText: "draft an offer letter" }).model === heavyModel()
+    );
+    check(
+      "pickModel: fast route names the fast model",
+      pickModel({ userText: "what's my day?" }).model === fastModel()
+    );
+    check(
+      "isHeavyIntent agrees with pickModel.heavy",
+      isHeavyIntent("draft an offer letter") === true &&
+        isHeavyIntent("what's my day?") === false
+    );
+    check(
+      "default heavy model is deepseek-v4-pro:cloud (empirically chosen)",
+      HEAVY_MODEL_DEFAULT === "deepseek-v4-pro:cloud",
+      HEAVY_MODEL_DEFAULT
+    );
+  }
+
+  console.log("\n=== 22. Model routing: live agent-loop (ops=fast, draft=heavy) ===");
+  {
+    // Ops request: must stay on the fast model and still answer.
+    ollamaModelsSeen.length = 0;
+    telegramCalls.length = 0;
+    await sendText(OWNER_CHAT, "what's my day looking like?");
+    const opsModels = [...ollamaModelsSeen];
+    console.log("ops request models:", opsModels.join(", "));
+    check(
+      "ops request used ONLY the fast model",
+      opsModels.length > 0 && opsModels.every((m) => m === fastModel()),
+      opsModels.join(", ") || "no model call captured"
+    );
+
+    // Document request: must route to the heavy model AND still produce output
+    // within the function budget (park/send the document tool).
+    ollamaModelsSeen.length = 0;
+    telegramCalls.length = 0;
+    lastPdf = null;
+    await sendText(
+      OWNER_CHAT,
+      "draft an offer letter document for Palm Hills Spa — three short sentences offering our facial treatments for their guests"
+    );
+    const draftModels = [...ollamaModelsSeen];
+    console.log("draft request models:", draftModels.join(", "));
+    check(
+      "draft/offer request routed to the heavy model",
+      draftModels.includes(heavyModel()),
+      draftModels.join(", ") || "no model call captured"
+    );
+    const docCall = telegramCalls.find((c) => c.url.includes("sendDocument"));
+    check(
+      "heavy run still produced output within budget (document sent or text reply)",
+      Boolean(docCall) || lastTelegramText().length > 20,
+      docCall ? "document sent" : lastTelegramText().slice(0, 160)
+    );
+  }
+
+  console.log("\n=== 23. Model routing: heavy-unavailable → fast fallback (fail safe) ===");
+  {
+    const savedHeavy = process.env.OLLAMA_MODEL_HEAVY;
+    // Point heavy at a model that isn't pulled on this host → callOllama
+    // throws (404) → the loop must retry once on the fast model, never
+    // hard-fail the request over routing.
+    process.env.OLLAMA_MODEL_HEAVY = "nonexistent-heavy-model:cloud";
+    ollamaModelsSeen.length = 0;
+    telegramCalls.length = 0;
+    await sendText(
+      OWNER_CHAT,
+      "draft an offer letter document for a new spa partner, two sentences"
+    );
+    const models = [...ollamaModelsSeen];
+    console.log("fallback models:", models.join(", "));
+    check(
+      "heavy attempted then fast-model fallback (both models seen)",
+      models.includes("nonexistent-heavy-model:cloud") &&
+        models.includes(fastModel()),
+      models.join(", ")
+    );
+    check(
+      "request still answered despite heavy failure (no hard-fail over routing)",
+      lastTelegramText().length > 10,
+      lastTelegramText().slice(0, 160)
+    );
+    if (savedHeavy === undefined) delete process.env.OLLAMA_MODEL_HEAVY;
+    else process.env.OLLAMA_MODEL_HEAVY = savedHeavy;
+  }
+
+  console.log("\n=== 24. Web search / fetch tools ===");
+  {
+    const ctx = { chatId: OWNER_CHAT };
+    const enabled = webSearchEnabled();
+    console.log(
+      `webSearchEnabled(): ${enabled} ` +
+        `(OLLAMA_API_KEY ${(process.env.OLLAMA_API_KEY || "").trim() ? "set" : "blank"})`
+    );
+
+    check(
+      "web_search + web_fetch are registered read-only tools",
+      TOOLS.some((t) => t.function.name === "web_search") &&
+        TOOLS.some((t) => t.function.name === "web_fetch")
+    );
+
+    if (enabled) {
+      const sr = await executeTool(
+        "web_search",
+        { query: "onmacabim official site" },
+        ctx
+      );
+      console.log("--- web_search (live) ---\n" + sr.slice(0, 500));
+      check(
+        "web_search returned real results (a URL, not the disabled message)",
+        /https?:\/\//.test(sr) && sr !== WEB_SEARCH_DISABLED_MESSAGE,
+        sr.slice(0, 160)
+      );
+    } else {
+      const sr = await executeTool(
+        "web_search",
+        { query: "onmacabim official site" },
+        ctx
+      );
+      const fr = await executeTool(
+        "web_fetch",
+        { url: "https://example.com" },
+        ctx
+      );
+      check(
+        "web_search disabled → clean unavailable message (no fake results)",
+        sr === WEB_SEARCH_DISABLED_MESSAGE,
+        sr.slice(0, 160)
+      );
+      check(
+        "web_fetch disabled → clean unavailable message (no fake results)",
+        fr === WEB_SEARCH_DISABLED_MESSAGE,
+        fr.slice(0, 160)
+      );
+    }
+
+    // The persona advertises web lookups (and the untrusted-content rule) ONLY
+    // when web search is actually usable.
+    const prompt = buildVassiliSystemPrompt();
+    check(
+      "system prompt advertises web lookups iff enabled",
+      enabled ? /web_search/.test(prompt) : !/web_search/.test(prompt)
+    );
+    if (enabled) {
+      check(
+        "enabled prompt carries the untrusted-web-content security line",
+        /UNTRUSTED/.test(prompt)
+      );
+    }
   }
 } catch (error) {
   crashed = error;
