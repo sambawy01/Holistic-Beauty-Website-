@@ -77,6 +77,12 @@ const HEAVY_MIN_REMAINING_MS = 35_000;
 
 export const FAST_MODEL_DEFAULT = "deepseek-v4-flash:cloud";
 export const HEAVY_MODEL_DEFAULT = "deepseek-v4-pro:cloud";
+// VISION (multimodal) default — chosen empirically over gemma3:27b for the
+// photo flows (see src/lib/assistant/vision.ts header): comparable structured
+// extraction with materially lower latency (~3–5s vs ~6–9s on the same probes,
+// which matters under the webhook's deadline when a SECOND text-agent round
+// follows), better product-name capture, and correct skin-assessment refusal.
+export const VISION_MODEL_DEFAULT = "gemini-3-flash-preview";
 
 /** The everyday fast model (OLLAMA_MODEL override, else the flash default). */
 export function fastModel(): string {
@@ -85,6 +91,10 @@ export function fastModel(): string {
 /** The heavyweight model for long-form generation (OLLAMA_MODEL_HEAVY). */
 export function heavyModel(): string {
   return process.env.OLLAMA_MODEL_HEAVY || HEAVY_MODEL_DEFAULT;
+}
+/** The multimodal model for photo understanding (OLLAMA_MODEL_VISION). */
+export function visionModel(): string {
+  return process.env.OLLAMA_MODEL_VISION || VISION_MODEL_DEFAULT;
 }
 
 // Generation verbs + document nouns. Heavy routing fires when the user is
@@ -115,16 +125,34 @@ export function isHeavyIntent(userText: string): boolean {
 export interface ModelRoute {
   model: string;
   heavy: boolean;
+  /** True when the route selected the multimodal (vision) model. */
+  vision?: boolean;
   reason: string;
 }
 
 /**
- * Pick the model for a run from the user's message. Pure + env-overridable so
- * it can be unit-tested in isolation. Document/long-form intent → heavy; every
- * other (ops) request → fast.
+ * Pick the model for a run. Pure + env-overridable so it can be unit-tested in
+ * isolation. Routing precedence:
+ * - an IMAGE is present → the multimodal (vision) model. A photo always needs a
+ *   model that can see it, so this wins over text-intent heuristics. (The
+ *   webhook's two-stage photo flow uses this for the extraction call; the
+ *   follow-up text-agent round routes on the synthesized instruction below.)
+ * - document/long-form text intent → heavy.
+ * - everything else (ops) → fast.
  */
-export function pickModel(ctx: { userText: string }): ModelRoute {
-  if (isHeavyIntent(ctx.userText)) {
+export function pickModel(ctx: {
+  userText?: string;
+  hasImage?: boolean;
+}): ModelRoute {
+  if (ctx.hasImage) {
+    return {
+      model: visionModel(),
+      heavy: false,
+      vision: true,
+      reason: "image present → multimodal vision model",
+    };
+  }
+  if (isHeavyIntent(ctx.userText ?? "")) {
     return {
       model: heavyModel(),
       heavy: true,

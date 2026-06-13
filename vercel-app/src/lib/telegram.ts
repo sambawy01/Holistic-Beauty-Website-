@@ -146,6 +146,67 @@ export async function answerCallbackQuery(
   });
 }
 
+/**
+ * Resolve a Telegram file_id to a downloadable file_path via getFile.
+ * Returns { ok:false } on any API failure (caller degrades gracefully — a
+ * voice note / photo we can't fetch must never crash the webhook).
+ */
+export interface ResolvedFile {
+  ok: boolean;
+  filePath?: string;
+  /** file_size in bytes as reported by Telegram (when present). */
+  fileSize?: number;
+}
+
+export async function getFile(fileId: string): Promise<ResolvedFile> {
+  const r = await callTelegram("getFile", { file_id: fileId });
+  if (!r.ok) return { ok: false };
+  const res = r.result as
+    | { file_path?: string; file_size?: number }
+    | undefined;
+  if (!res || typeof res.file_path !== "string") return { ok: false };
+  return {
+    ok: true,
+    filePath: res.file_path,
+    fileSize:
+      typeof res.file_size === "number" ? res.file_size : undefined,
+  };
+}
+
+/**
+ * Download a file's bytes from Telegram's file CDN (api.telegram.org/file/
+ * bot<token>/<file_path>). `maxBytes` caps the download: if Content-Length
+ * exceeds it we bail before reading the body (a guard on attacker/garbage
+ * uploads). Throws on transport / non-200 / oversize — callers catch and
+ * reply with a friendly message.
+ */
+export async function downloadFile(
+  filePath: string,
+  options: { maxBytes?: number; timeoutMs?: number } = {}
+): Promise<Buffer> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  const url = `${API_BASE}/file/bot${token}/${filePath}`;
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+  });
+  if (!res.ok) {
+    throw new Error(`downloadFile failed (${res.status})`);
+  }
+  const max = options.maxBytes;
+  if (max !== undefined) {
+    const declared = Number(res.headers.get("content-length") || "");
+    if (Number.isFinite(declared) && declared > max) {
+      throw new Error(`file too large (${declared} bytes > ${max})`);
+    }
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (max !== undefined && buf.length > max) {
+    throw new Error(`file too large (${buf.length} bytes > ${max})`);
+  }
+  return buf;
+}
+
 /** Send a document (PDF) as multipart/form-data. */
 export async function sendDocument(
   chatId: number,
