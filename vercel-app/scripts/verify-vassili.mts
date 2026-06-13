@@ -85,24 +85,72 @@ const ollamaRequests: {
  */
 const ollamaModelsSeen: string[] = [];
 
+/**
+ * Mocked Telegram file store: file_id → bytes + mime. getFile() resolves a
+ * file_id to file_path `mock/<file_id>`; the file CDN GET returns these bytes.
+ * Lets the REAL voice (Groq) / vision (Ollama) calls run on real local assets
+ * while Telegram itself stays fully mocked (no bot exists).
+ */
+const tgFiles: Record<string, { buf: Buffer; mime: string }> = {};
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url =
     typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? "GET").toUpperCase();
 
-  // Record the model on EVERY chat call (scripted or real) for routing checks.
+  // Record the model on EVERY chat call (scripted or real) for routing checks,
+  // and flag VISION requests (messages carrying an `images` array) so the
+  // scripted-Ollama queue can let them through to the REAL multimodal model
+  // while still scripting the downstream text-agent round.
+  let requestHasImages = false;
   if (url.includes("/api/chat") && typeof init?.body === "string") {
     try {
-      const parsed = JSON.parse(init.body) as { model?: unknown };
+      const parsed = JSON.parse(init.body) as {
+        model?: unknown;
+        messages?: { images?: unknown }[];
+      };
       if (typeof parsed.model === "string") ollamaModelsSeen.push(parsed.model);
+      requestHasImages =
+        Array.isArray(parsed.messages) &&
+        parsed.messages.some(
+          (m) => Array.isArray(m?.images) && m.images.length > 0
+        );
     } catch {
       // not JSON — ignore
     }
   }
 
   if (url.includes("api.telegram.org")) {
+    // File CDN download (GET .../file/bot<token>/mock/<file_id>) → raw bytes.
+    if (url.includes("/file/bot")) {
+      const fid = url.split("/").pop() ?? "";
+      const reg = tgFiles[fid];
+      if (!reg) return new Response("not found", { status: 404 });
+      return new Response(new Uint8Array(reg.buf), {
+        status: 200,
+        headers: {
+          "Content-Type": reg.mime,
+          "Content-Length": String(reg.buf.length),
+        },
+      });
+    }
     const cap: Captured = { url, method };
+    // getFile → resolve file_id to a mock file_path (the file_id itself).
+    if (url.includes("/getFile")) {
+      cap.body =
+        typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      telegramCalls.push(cap);
+      const fid = (cap.body as { file_id?: string } | undefined)?.file_id ?? "";
+      const reg = tgFiles[fid];
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          result: { file_path: `mock/${fid}`, file_size: reg?.buf.length ?? 0 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
     if (init?.body instanceof FormData) {
       cap.form = {};
       for (const [key, value] of init.body.entries()) {
@@ -143,6 +191,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   if (
     scriptedOllama !== null &&
+    !requestHasImages &&
     (url.includes("ollama.com/api/chat") || url.includes(":11434/api/chat"))
   ) {
     if (typeof init?.body === "string") {
@@ -247,8 +296,15 @@ const {
   isHeavyIntent,
   fastModel,
   heavyModel,
+  visionModel,
   HEAVY_MODEL_DEFAULT,
+  VISION_MODEL_DEFAULT,
 } = await import("../src/lib/assistant/agent");
+const { voiceEnabled, transcribeVoice, MAX_VOICE_SECONDS } = await import(
+  "../src/lib/assistant/voice"
+);
+const { visionEnabled, analyzePhoto, skinAssessmentIntent, SKIN_REFUSAL } =
+  await import("../src/lib/assistant/vision");
 const { buildVassiliSystemPrompt } = await import("../src/lib/assistant/prompt");
 const {
   webSearchEnabled,
@@ -334,6 +390,57 @@ async function sendText(chatId: number, text: string) {
     }) as never
   );
   return res;
+}
+
+let fileSeq = 0;
+/** Register local bytes as a Telegram file and return its file_id. */
+function registerFile(buf: Buffer, mime: string): string {
+  const fid = `mockfile-${++fileSeq}`;
+  tgFiles[fid] = { buf, mime };
+  return fid;
+}
+
+async function sendVoice(
+  chatId: number,
+  buf: Buffer,
+  extra: { duration?: number; file_size?: number; mime_type?: string } = {}
+) {
+  const file_id = registerFile(buf, extra.mime_type ?? "audio/ogg");
+  return webhookPOST(
+    tgRequest({
+      update_id: updateId++,
+      message: {
+        message_id: messageId++,
+        chat: { id: chatId, type: "private" },
+        from: { id: chatId, first_name: "Test" },
+        voice: {
+          file_id,
+          duration: extra.duration ?? 3,
+          mime_type: extra.mime_type ?? "audio/ogg",
+          file_size: extra.file_size ?? buf.length,
+        },
+      },
+    }) as never
+  );
+}
+
+async function sendPhoto(chatId: number, buf: Buffer, caption?: string) {
+  const file_id = registerFile(buf, "image/png");
+  return webhookPOST(
+    tgRequest({
+      update_id: updateId++,
+      message: {
+        message_id: messageId++,
+        chat: { id: chatId, type: "private" },
+        from: { id: chatId, first_name: "Test" },
+        ...(caption ? { caption } : {}),
+        photo: [
+          { file_id: `${file_id}-s`, width: 90, height: 90, file_size: 1000 },
+          { file_id, width: 520, height: 540, file_size: buf.length },
+        ],
+      },
+    }) as never
+  );
 }
 
 async function tapButton(chatId: number, data: string, fromId?: number) {
@@ -2630,6 +2737,333 @@ try {
         /UNTRUSTED/.test(prompt)
       );
     }
+  }
+
+  const fixture = (name: string) =>
+    readFileSync(join(__dirname, "fixtures", name));
+
+  console.log(
+    "\n=== 25. Voice notes: Groq Whisper transcription → agent loop [REAL Groq] ==="
+  );
+  {
+    check("voiceEnabled() true when GROQ_API_KEY present", voiceEnabled());
+
+    // (a) REAL Groq transcription — English.
+    const enBuf = fixture("voice-en.ogg");
+    const enTx = await transcribeVoice(enBuf, { mime: "audio/ogg" });
+    check(
+      "Groq transcribes EN voice → non-empty text",
+      enTx.ok && enTx.text.length > 5,
+      enTx.ok ? enTx.text : `reason=${enTx.reason}`
+    );
+    check(
+      "EN transcript recognizes the spoken command (book/order/confirm/ship)",
+      enTx.ok && /book|order|confirm|ship/i.test(enTx.text),
+      enTx.ok ? enTx.text : ""
+    );
+
+    // (b) REAL Groq transcription — Russian (Cyrillic out, auto-detected).
+    const ruBuf = fixture("voice-ru.ogg");
+    const ruTx = await transcribeVoice(ruBuf, { mime: "audio/ogg" });
+    check(
+      "Groq transcribes RU voice → Cyrillic text (auto language detect)",
+      ruTx.ok && /[А-Яа-яЁё]/.test(ruTx.text),
+      ruTx.ok ? ruTx.text : `reason=${ruTx.reason}`
+    );
+
+    // (c) Full webhook path: REAL transcript drives the "🎙 Heard:" echo, then
+    //     the (scripted — "mock the downstream") agent parks a mutating action
+    //     behind the SAME confirm gate. Nothing mutates pre-confirm.
+    telegramCalls.length = 0;
+    calMutations.length = 0;
+    resendCalls.length = 0;
+    scriptedOllama = [
+      {
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              function: {
+                name: "order_set_status",
+                arguments: { orderNumber: "VV-AB12CD", status: "shipped" },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    await sendVoice(OWNER_CHAT, enBuf, { duration: 5 });
+    scriptedOllama = null;
+    check(
+      "voice → '🎙 Heard:' transcript echo sent before acting",
+      messagesTo(OWNER_CHAT, /🎙 Heard:/).length === 1
+    );
+    const voicePending = lastKeyboardPendingId();
+    check(
+      "transcribed command parks a mutating action behind the confirm gate",
+      voicePending !== null && /Please confirm/.test(lastTelegramText()),
+      lastTelegramText().slice(0, 120)
+    );
+    check(
+      "nothing mutated before the confirm tap (no Cal / Resend)",
+      calMutations.length === 0 && resendCalls.length === 0
+    );
+    if (voicePending) await tapButton(OWNER_CHAT, `cancel:${voicePending}`);
+
+    // (d) Non-owner voice → the existing owner gate refuses BEFORE any
+    //     download/transcription (same path as text).
+    telegramCalls.length = 0;
+    await sendVoice(STRANGER_CHAT, enBuf, { duration: 3 });
+    check(
+      "non-owner voice → private-assistant refusal (owner gate first, no transcription)",
+      messagesTo(STRANGER_CHAT, REFUSAL_RE).length === 1 &&
+        messagesTo(STRANGER_CHAT, /🎙 Heard:/).length === 0
+    );
+
+    // (e) Over-long voice note → friendly cap message, never a crash, no upload.
+    telegramCalls.length = 0;
+    await sendVoice(OWNER_CHAT, enBuf, { duration: MAX_VOICE_SECONDS + 60 });
+    check(
+      "over-long voice note → friendly 'too long' message (capped, no crash)",
+      messagesTo(OWNER_CHAT, /transcribe up to|shorter/i).length >= 1 &&
+        messagesTo(OWNER_CHAT, /🎙 Heard:/).length === 0,
+      lastTelegramText().slice(0, 120)
+    );
+
+    // (f) Degradation: no GROQ key → graceful disabled message (prod safety).
+    const savedGroq = process.env.GROQ_API_KEY;
+    process.env.GROQ_API_KEY = "";
+    telegramCalls.length = 0;
+    await sendVoice(OWNER_CHAT, enBuf, { duration: 3 });
+    check(
+      "voice with no GROQ key → graceful 'not configured' message (degrades)",
+      messagesTo(OWNER_CHAT, /isn't configured|can't transcribe/i).length >= 1,
+      lastTelegramText().slice(0, 120)
+    );
+    check("voiceEnabled() false when GROQ_API_KEY blank", !voiceEnabled());
+    process.env.GROQ_API_KEY = savedGroq;
+  }
+
+  console.log(
+    "\n=== 26. Vision: receipt → log_expense, product → product_add (via the gate) [REAL Ollama vision] ==="
+  );
+  {
+    check("visionEnabled() true when OLLAMA_API_KEY present", visionEnabled());
+
+    // (a) Receipt: REAL multimodal extraction → scripted downstream agent parks
+    //     log_expense. The echo proves the REAL vision output; the confirm
+    //     summary proves the gate parked it. Nothing logged pre-confirm.
+    telegramCalls.length = 0;
+    ollamaModelsSeen.length = 0;
+    scriptedOllama = [
+      {
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              function: {
+                name: "log_expense",
+                arguments: {
+                  category: "supplies",
+                  amountEgp: 1200,
+                  method: "cash",
+                  note: "BEAUTY SUPPLY CO, receipt photo",
+                  date: "2026-06-10",
+                },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    await sendPhoto(OWNER_CHAT, fixture("receipt.png"), "receipt for shop supplies");
+    scriptedOllama = null;
+    check(
+      "receipt photo used the vision model (real multimodal call)",
+      ollamaModelsSeen.includes(visionModel()),
+      ollamaModelsSeen.join(", ") || "no model seen"
+    );
+    const receiptEcho = messagesTo(OWNER_CHAT, /From the receipt I read/);
+    const receiptEchoText = String(
+      (receiptEcho[0]?.body as { text?: string } | undefined)?.text ?? ""
+    );
+    check(
+      "vision extracted + echoed real receipt fields (vendor / total)",
+      receiptEcho.length === 1 &&
+        /BEAUTY SUPPLY|1200/i.test(receiptEchoText),
+      receiptEchoText.replace(/\n/g, " ").slice(0, 160)
+    );
+    const expPending = lastKeyboardPendingId();
+    check(
+      "receipt → log_expense parked behind the confirm gate (nothing logged pre-confirm)",
+      expPending !== null && /Log expense: 1200 EGP/.test(lastTelegramText()),
+      lastTelegramText().slice(0, 160)
+    );
+    if (expPending) await tapButton(OWNER_CHAT, `cancel:${expPending}`);
+
+    // (b) Product: REAL extraction → scripted agent parks product_add.
+    telegramCalls.length = 0;
+    ollamaModelsSeen.length = 0;
+    scriptedOllama = [
+      {
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            {
+              function: {
+                name: "product_add",
+                arguments: {
+                  nameEn: "AHAVA Night Cream",
+                  nameRu: "Ночной крем AHAVA",
+                  priceEgp: 950,
+                  descEn: "50 ml night cream",
+                },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    await sendPhoto(
+      OWNER_CHAT,
+      fixture("product-jar.png"),
+      "new product for the shop, 950 EGP, Russian name Ночной крем AHAVA"
+    );
+    scriptedOllama = null;
+    check(
+      "product photo used the vision model (real multimodal call)",
+      ollamaModelsSeen.includes(visionModel()),
+      ollamaModelsSeen.join(", ") || "no model seen"
+    );
+    check(
+      "vision extracted + echoed the product",
+      messagesTo(OWNER_CHAT, /From the product photo/).length === 1
+    );
+    const prodPending = lastKeyboardPendingId();
+    check(
+      "product → product_add parked behind the confirm gate (goes live only on confirm)",
+      prodPending !== null && /Add product/.test(lastTelegramText()),
+      lastTelegramText().slice(0, 160)
+    );
+    if (prodPending) await tapButton(OWNER_CHAT, `cancel:${prodPending}`);
+  }
+
+  console.log(
+    "\n=== 27. Vision GUARDRAIL: refuse skin/face assessment (never analyze) ==="
+  );
+  {
+    // Unit: caption intent detector — EN + RU caught, ops/product captions not.
+    check(
+      "skinAssessmentIntent: EN assessment phrasings detected",
+      [
+        "what treatment does her skin need? analyze the wrinkles",
+        "analyze my wrinkles",
+        "can you assess her acne",
+        "look at my complexion",
+        "what does her skin need",
+      ].every(skinAssessmentIntent)
+    );
+    check(
+      "skinAssessmentIntent: RU assessment phrasings detected",
+      [
+        "проанализируй её кожу",
+        "что с кожей лица",
+        "оцени морщины",
+      ].every(skinAssessmentIntent)
+    );
+    check(
+      "skinAssessmentIntent: legit product / ops captions NOT flagged (no false refusal)",
+      [
+        "new skin cream for the shop",
+        "receipt for supplies",
+        "add this product",
+        "face cream jar, 950 EGP",
+        "Ночной крем AHAVA, 950 EGP",
+      ].every((c) => !skinAssessmentIntent(c))
+    );
+
+    // Direct: analyzePhoto returns the polite refusal (with booking nudge).
+    const faceBuf = fixture("face.png");
+    const direct = await analyzePhoto(
+      faceBuf,
+      "analyze my skin and tell me what treatment it needs",
+      {}
+    );
+    check(
+      "analyzePhoto → polite refusal + booking suggestion for skin-assessment intent",
+      direct.kind === "reply" &&
+        direct.text === SKIN_REFUSAL &&
+        /consultation/i.test(direct.text)
+    );
+
+    // Full webhook path: face photo + skin caption → refusal, NO analysis,
+    // NO vision-model call, NO mutating action parked.
+    telegramCalls.length = 0;
+    ollamaModelsSeen.length = 0;
+    await sendPhoto(
+      OWNER_CHAT,
+      faceBuf,
+      "what treatment does her skin need? analyze the wrinkles"
+    );
+    check(
+      "skin-assessment photo intent → polite refusal sent (booking offered)",
+      messagesTo(OWNER_CHAT, /consultation/i).length >= 1,
+      lastTelegramText().slice(0, 160)
+    );
+    check(
+      "refusal short-circuits BEFORE the vision model (no analysis attempted)",
+      ollamaModelsSeen.length === 0,
+      ollamaModelsSeen.join(", ") || "no model call"
+    );
+    check(
+      "skin-assessment intent parks NOTHING (no log/add behind a button)",
+      lastKeyboardPendingId() === null
+    );
+  }
+
+  console.log(
+    "\n=== 28. Routing: image → vision model; graceful vision degradation ==="
+  );
+  {
+    const imgRoute = pickModel({ hasImage: true });
+    check(
+      "pickModel: image present → vision model selected",
+      imgRoute.vision === true && imgRoute.model === visionModel(),
+      `${imgRoute.model} vision=${imgRoute.vision}`
+    );
+    check(
+      "pickModel: vision default is gemini-3-flash-preview (empirically chosen)",
+      VISION_MODEL_DEFAULT === "gemini-3-flash-preview",
+      VISION_MODEL_DEFAULT
+    );
+    check(
+      "pickModel: text-only requests unaffected by vision routing",
+      pickModel({ userText: "what's my day?" }).vision !== true &&
+        pickModel({ userText: "what's my day?" }).model === fastModel()
+    );
+    check(
+      "pickModel: an image OUTWEIGHS heavy text intent",
+      pickModel({ userText: "draft an offer letter", hasImage: true }).vision ===
+        true
+    );
+
+    // Degradation: no cloud key → graceful message, no crash, no model call.
+    const savedKey = process.env.OLLAMA_API_KEY;
+    process.env.OLLAMA_API_KEY = "";
+    check("visionEnabled() false when OLLAMA_API_KEY blank", !visionEnabled());
+    telegramCalls.length = 0;
+    ollamaModelsSeen.length = 0;
+    await sendPhoto(OWNER_CHAT, fixture("receipt.png"), "receipt");
+    check(
+      "photo with no cloud key → graceful 'vision isn't configured' message (degrades)",
+      messagesTo(OWNER_CHAT, /vision isn't configured|can't look at photos/i)
+        .length >= 1 && ollamaModelsSeen.length === 0,
+      lastTelegramText().slice(0, 120)
+    );
+    process.env.OLLAMA_API_KEY = savedKey;
   }
 } catch (error) {
   crashed = error;
